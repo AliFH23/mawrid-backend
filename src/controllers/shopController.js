@@ -1,5 +1,12 @@
 import Shop from '../models/Shop.js';
 import Category from '../models/Category.js';
+import DeliveryZone from '../models/DeliveryZone.js';
+
+// nested populate used everywhere below: shop.deliveryZone.governorateId comes back
+// as a full { _id, name } object, not just a raw id — this is what lets the frontend
+// pre-select "current governorate" correctly on the settings page instead of showing
+// an empty field that looks like you're adding a brand new one
+const DELIVERY_ZONE_POPULATE = { path: 'deliveryZone', populate: { path: 'governorateId' } };
 
 // @route   POST /api/shops
 // @access  Private (buyer only)
@@ -20,7 +27,6 @@ export const createShop = async (req, res) => {
       return res.status(400).json({ message: 'This user already has a shop' });
     }
 
-    // make sure every category id actually exists and is active, so we don't link to garbage ids
     const validCategories = await Category.find({
       _id: { $in: categoryIds },
       isActive: true,
@@ -29,12 +35,19 @@ export const createShop = async (req, res) => {
       return res.status(400).json({ message: 'One or more category ids are invalid' });
     }
 
+    const zone = await DeliveryZone.findOne({ _id: deliveryZone, isActive: true });
+    if (!zone) {
+      return res.status(400).json({ message: 'Invalid delivery zone id' });
+    }
+
     const shop = await Shop.create({
       userId: req.user._id,
       shopName,
       categoryIds,
       deliveryZone,
     });
+
+    await shop.populate(['categoryIds', DELIVERY_ZONE_POPULATE]);
 
     res.status(201).json({ shop });
   } catch (error) {
@@ -49,7 +62,9 @@ export const createShop = async (req, res) => {
 // @access  Private (buyer only)
 export const getMyShop = async (req, res) => {
   try {
-    const shop = await Shop.findOne({ userId: req.user._id }).populate('categoryIds');
+    const shop = await Shop.findOne({ userId: req.user._id })
+      .populate('categoryIds')
+      .populate(DELIVERY_ZONE_POPULATE);
 
     if (!shop) {
       return res.status(404).json({ message: 'No shop found for this user' });
@@ -77,11 +92,20 @@ export const updateMyShop = async (req, res) => {
       }
     }
 
+    if (deliveryZone) {
+      const zone = await DeliveryZone.findOne({ _id: deliveryZone, isActive: true });
+      if (!zone) {
+        return res.status(400).json({ message: 'Invalid delivery zone id' });
+      }
+    }
+
     const shop = await Shop.findOneAndUpdate(
       { userId: req.user._id },
       { shopName, categoryIds, deliveryZone },
       { new: true, runValidators: true }
-    );
+    )
+      .populate('categoryIds')
+      .populate(DELIVERY_ZONE_POPULATE);
 
     if (!shop) {
       return res.status(404).json({ message: 'No shop found for this user' });
@@ -100,14 +124,15 @@ export const updateMyShop = async (req, res) => {
 // @access  Private (admin only)
 export const getShops = async (req, res) => {
   try {
-    const shops = await Shop.find().populate('categoryIds').populate('userId', 'name email phone');
+    const shops = await Shop.find()
+      .populate('categoryIds')
+      .populate(DELIVERY_ZONE_POPULATE)
+      .populate('userId', 'name email phone');
     res.status(200).json({ shops });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
-
-
 
 // @route   GET /api/shops/:id
 // @access  Private (admin only)
@@ -115,6 +140,7 @@ export const getShopById = async (req, res) => {
   try {
     const shop = await Shop.findById(req.params.id)
       .populate('categoryIds')
+      .populate(DELIVERY_ZONE_POPULATE)
       .populate('userId', 'name email phone');
 
     if (!shop) {

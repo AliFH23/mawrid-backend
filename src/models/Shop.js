@@ -33,11 +33,12 @@ const shopSchema = new mongoose.Schema(
       required: [true, 'At least one category is required'],
     },
 
-    // fixed delivery zone chosen from a predefined list (city/area), not free GPS
+    // fixed delivery zone chosen from the DeliveryZone collection — not free text,
+    // so "Irbid" and "irbid " never end up as two different values by accident
     deliveryZone: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'DeliveryZone',
       required: [true, 'Delivery zone is required'],
-      trim: true,
     },
 
     isActive: {
