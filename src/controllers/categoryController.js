@@ -1,10 +1,10 @@
 import Category from '../models/Category.js';
 
 // @route   GET /api/categories
-// @access  Public (any logged-in user needs to see categories to pick from)
+// @access  Private (any logged-in user)
 export const getCategories = async (req, res) => {
   try {
-    const categories = await Category.find({ isActive: true });
+    const categories = await Category.find({ isActive: true }).sort({ name: 1 });
     res.status(200).json({ categories });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -16,16 +16,26 @@ export const getCategories = async (req, res) => {
 export const createCategory = async (req, res) => {
   try {
     const { name, icon } = req.body;
-
     if (!name) {
       return res.status(400).json({ message: 'Category name is required' });
+    }
+
+    const existing = await Category.findOne({ name });
+    if (existing) {
+      if (existing.isActive) {
+        return res.status(400).json({ message: 'This category already exists' });
+      }
+      existing.isActive = true;
+      if (icon !== undefined) existing.icon = icon;
+      await existing.save();
+      return res.status(200).json({ category: existing });
     }
 
     const category = await Category.create({ name, icon });
     res.status(201).json({ category });
   } catch (error) {
     if (error.code === 11000) {
-      return res.status(400).json({ message: 'A category with this name already exists' });
+      return res.status(400).json({ message: 'This category already exists' });
     }
     res.status(500).json({ message: error.message });
   }
@@ -36,7 +46,7 @@ export const createCategory = async (req, res) => {
 export const updateCategory = async (req, res) => {
   try {
     const category = await Category.findByIdAndUpdate(req.params.id, req.body, {
-      new: true, // return the updated document, not the old one
+      new: true,
       runValidators: true,
     });
 
@@ -52,7 +62,6 @@ export const updateCategory = async (req, res) => {
 
 // @route   DELETE /api/categories/:id
 // @access  Private (admin only)
-// soft delete — we deactivate instead of removing, since pools/shops may reference this category
 export const deleteCategory = async (req, res) => {
   try {
     const category = await Category.findByIdAndUpdate(

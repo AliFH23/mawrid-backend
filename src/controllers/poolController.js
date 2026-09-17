@@ -1,38 +1,40 @@
 import mongoose from 'mongoose';
 import Pool from '../models/Pool.js';
+import Transaction from '../models/Transaction.js';
 import Supplier from '../models/Supplier.js';
 import Category from '../models/Category.js';
+import DeliveryZone from '../models/DeliveryZone.js';
 import Shop from '../models/Shop.js';
 import Participation from '../models/Participation.js';
 import PurchaseOrder from '../models/PurchaseOrder.js';
 
-
-
-const MIN_RELIABILITY_SCORE_TO_CREATE_POOL = 50; // suppliers below this score are suspended from opening new pools
-const COMMITMENT_FEE_RATE = 0.05; // 5% of the participation's own value, held as a refundable/forfeitable deposit
+const COMMITMENT_FEE_RATE = 0.05;
+const MIN_RELIABILITY_SCORE_TO_CREATE_POOL = 50;
 
 // @route   POST /api/pools
 // @access  Private (admin or supplier)
 export const createPool = async (req, res) => {
   try {
-    const { productName, categoryId, deliveryZone, unitPrice, minQuantity, maxQuantity, expiryDate } = req.body;
+    const { productName, categoryIds, deliveryZone, unitPrice, minQuantity, maxQuantity, expiryDate } = req.body;
 
-    if (!productName || !categoryId || !deliveryZone || !unitPrice || !minQuantity || !maxQuantity || !expiryDate) {
-      return res.status(400).json({ message: 'All fields are required' });
+    if (!productName || !categoryIds || !categoryIds.length || !deliveryZone || !unitPrice || !minQuantity || !maxQuantity || !expiryDate) {
+      return res.status(400).json({ message: 'All fields are required (including at least one category)' });
     }
 
-    // an expiry date in the past would let a pool expire before anyone could ever join it
     if (new Date(expiryDate) <= new Date()) {
       return res.status(400).json({ message: 'expiryDate must be in the future' });
     }
 
-    const category = await Category.findOne({ _id: categoryId, isActive: true });
-    if (!category) {
-      return res.status(400).json({ message: 'Invalid category id' });
+    const validCategories = await Category.find({ _id: { $in: categoryIds }, isActive: true });
+    if (validCategories.length !== categoryIds.length) {
+      return res.status(400).json({ message: 'One or more category ids are invalid' });
     }
 
-    // a supplier can only open pools under their own supplier profile
-    // an admin must specify which supplier this pool is for
+    const zone = await DeliveryZone.findOne({ _id: deliveryZone, isActive: true });
+    if (!zone) {
+      return res.status(400).json({ message: 'Invalid delivery zone id' });
+    }
+
     let supplierId;
     if (req.user.role === 'supplier') {
       const supplier = await Supplier.findOne({ userId: req.user._id });
@@ -40,8 +42,6 @@ export const createPool = async (req, res) => {
         return res.status(400).json({ message: 'You do not have a supplier profile yet' });
       }
 
-      // enforces the risk-handling policy: repeated rejections lower this score,
-      // and a supplier who has fallen too low is suspended from opening new pools
       if (supplier.reliabilityScore < MIN_RELIABILITY_SCORE_TO_CREATE_POOL) {
         return res.status(403).json({
           message: `Your reliability score (${supplier.reliabilityScore}) is too low to open new pools. Contact the platform admin.`,
@@ -58,7 +58,7 @@ export const createPool = async (req, res) => {
 
     const pool = await Pool.create({
       productName,
-      categoryId,
+      categoryIds,
       deliveryZone,
       supplierId,
       createdBy: req.user._id,
@@ -79,16 +79,18 @@ export const createPool = async (req, res) => {
 
 // @route   GET /api/pools
 // @access  Private (any logged-in user)
-// supports optional filters: ?categoryId=...&deliveryZone=...&status=OPEN
+// supports optional filters: ?categoryId=...&deliveryZone=...&status=OPEN&supplierId=...
 export const getPools = async (req, res) => {
   try {
     const filter = {};
-    if (req.query.categoryId) filter.categoryId = req.query.categoryId;
+    if (req.query.categoryId) filter.categoryIds = req.query.categoryId; // matches any pool that includes this category
     if (req.query.deliveryZone) filter.deliveryZone = req.query.deliveryZone;
     if (req.query.status) filter.status = req.query.status;
+    if (req.query.supplierId) filter.supplierId = req.query.supplierId;
 
     const pools = await Pool.find(filter)
-      .populate('categoryId')
+      .populate('categoryIds')
+      .populate('deliveryZone')
       .populate('supplierId');
 
     res.status(200).json({ pools });
@@ -102,7 +104,8 @@ export const getPools = async (req, res) => {
 export const getPoolById = async (req, res) => {
   try {
     const pool = await Pool.findById(req.params.id)
-      .populate('categoryId')
+      .populate('categoryIds')
+      .populate('deliveryZone')
       .populate('supplierId');
 
     if (!pool) {
@@ -117,17 +120,11 @@ export const getPoolById = async (req, res) => {
 
 // @route   POST /api/pools/:id/join
 // @access  Private (buyer only)
-//
-// HARDENING NOTE: wrapped in a MongoDB transaction. Without this, two shops joining
-// at the exact same moment could both pass the "does this exceed maxQuantity" check
-// before either save finishes, letting the pool exceed its hard cap. The transaction
-// makes the capacity check and the quantity increment a single atomic operation:
-// either both succeed together, or both fail together — never a partial state.
 export const joinPool = async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    const { quantity } = req.body;
+    const { quantity, paymentMethod } = req.body;
 
     if (!quantity || quantity < 1) {
       return res.status(400).json({ message: 'A valid quantity is required' });
@@ -157,8 +154,6 @@ export const joinPool = async (req, res) => {
 
       const commitmentFeeAmount = Math.round(quantity * pool.unitPrice * COMMITMENT_FEE_RATE * 100) / 100;
 
-      // create the participation inside the transaction — if the unique index (poolId+shopId)
-      // rejects a duplicate join, the whole transaction rolls back automatically
       const created = await Participation.create(
         [
           {
@@ -166,15 +161,13 @@ export const joinPool = async (req, res) => {
             shopId: shop._id,
             quantity,
             commitmentFeeAmount,
+            paymentMethod: paymentMethod || 'CARD',
           },
         ],
         { session }
       );
       resultParticipation = created[0];
 
-      // atomic guarded increment: only applies if the pool is still OPEN, not expired,
-      // and the new total still fits within maxQuantity — all checked in the same
-      // database operation as the increment itself, closing the race-condition window
       const updatedPool = await Pool.findOneAndUpdate(
         {
           _id: pool._id,
@@ -193,7 +186,6 @@ export const joinPool = async (req, res) => {
         };
       }
 
-      // once the minimum is reached, move to the supplier confirmation stage automatically
       if (updatedPool.currentQuantity >= updatedPool.minQuantity && updatedPool.status === 'OPEN') {
         updatedPool.status = 'PENDING_SUPPLIER_CONFIRMATION';
         await updatedPool.save({ session });
@@ -221,7 +213,6 @@ export const joinPool = async (req, res) => {
 
 // @route   DELETE /api/pools/:id/leave
 // @access  Private (buyer only)
-// the shop withdraws before the pool completes — their commitment fee is forfeited (kept), not refunded
 export const leavePool = async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -254,12 +245,12 @@ export const leavePool = async (req, res) => {
       }
 
       participation.status = 'CANCELLED';
-      participation.commitmentFeeStatus = 'FORFEITED'; // shop withdrew voluntarily, so the fee is kept
+      participation.commitmentFeeStatus = 'FORFEITED';
       await participation.save({ session });
 
       pool.currentQuantity -= participation.quantity;
       if (pool.status === 'PENDING_SUPPLIER_CONFIRMATION' && pool.currentQuantity < pool.minQuantity) {
-        pool.status = 'OPEN'; // drop back below threshold, reopen the pool
+        pool.status = 'OPEN';
       }
       await pool.save({ session });
 
@@ -279,7 +270,6 @@ export const leavePool = async (req, res) => {
 
 // @route   POST /api/pools/:id/confirm
 // @access  Private (supplier who owns this pool, or admin)
-// the supplier confirms the final quantity/price after the pool hit its minimum — this generates the PurchaseOrder
 export const confirmPool = async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -342,8 +332,6 @@ export const confirmPool = async (req, res) => {
 
 // @route   POST /api/pools/:id/reject
 // @access  Private (supplier who owns this pool, or admin)
-// the supplier rejects the pool after it hit its minimum — every shop is refunded in full, no commission is charged,
-// and the supplier's reliability score drops (see the risk-handling policy)
 export const rejectPool = async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -369,14 +357,12 @@ export const rejectPool = async (req, res) => {
         }
       }
 
-      // full refund for every shop currently in the pool — the supplier is at fault, not the shops
       await Participation.updateMany(
         { poolId: pool._id, status: 'ACTIVE' },
         { commitmentFeeStatus: 'REFUNDED' },
         { session }
       );
 
-      // record the rejected order for history, with zero commission (no completed sale happened)
       await PurchaseOrder.create(
         [
           {
@@ -419,10 +405,6 @@ export const rejectPool = async (req, res) => {
 
 // @route   POST /api/pools/:id/cancel
 // @access  Private (supplier who owns this pool, or admin)
-// voluntary cancellation of a pool that hasn't completed yet (still OPEN, hasn't hit its minimum).
-// unlike rejectPool (which happens after the minimum is reached), this covers the supplier or
-// admin simply deciding to stop a pool early — every active participant is refunded in full,
-// since none of them did anything wrong.
 export const cancelPool = async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -449,7 +431,6 @@ export const cancelPool = async (req, res) => {
         }
       }
 
-      // refund every shop currently in the pool — cancelling was the supplier's/admin's choice, not theirs
       await Participation.updateMany(
         { poolId: pool._id, status: 'ACTIVE' },
         { commitmentFeeStatus: 'REFUNDED' },
@@ -476,11 +457,8 @@ export const cancelPool = async (req, res) => {
   }
 };
 
-
 // @route   GET /api/pools/:id/participants
 // @access  Private (admin, or the supplier who owns this pool)
-// lists every shop currently or previously in this pool — needed for the pool detail
-// page (who joined, how much, whether their commitment fee was paid/refunded/forfeited)
 export const getPoolParticipants = async (req, res) => {
   try {
     const pool = await Pool.findById(req.params.id);
@@ -509,12 +487,8 @@ export const getPoolParticipants = async (req, res) => {
   }
 };
 
-
 // @route   PUT /api/pools/:id
 // @access  Private (supplier who owns this pool, or admin)
-// only allowed while the pool is still OPEN — once shops have joined and it moves past
-// that stage, changing price/quantity retroactively would be unfair to whoever already
-// committed under the original terms.
 export const updatePool = async (req, res) => {
   try {
     const pool = await Pool.findById(req.params.id);
@@ -535,7 +509,17 @@ export const updatePool = async (req, res) => {
       }
     }
 
-    const { productName, unitPrice, minQuantity, maxQuantity, deliveryZone, expiryDate } = req.body;
+    const { productName, categoryIds, unitPrice, minQuantity, maxQuantity, deliveryZone, expiryDate } = req.body;
+
+    if (categoryIds !== undefined) {
+      if (!categoryIds.length) {
+        return res.status(400).json({ message: 'At least one category is required' });
+      }
+      const validCategories = await Category.find({ _id: { $in: categoryIds }, isActive: true });
+      if (validCategories.length !== categoryIds.length) {
+        return res.status(400).json({ message: 'One or more category ids are invalid' });
+      }
+    }
 
     if (maxQuantity !== undefined && maxQuantity < pool.currentQuantity) {
       return res.status(400).json({
@@ -548,8 +532,15 @@ export const updatePool = async (req, res) => {
     if (expiryDate !== undefined && new Date(expiryDate) <= new Date()) {
       return res.status(400).json({ message: 'expiryDate must be in the future' });
     }
+    if (deliveryZone !== undefined) {
+      const zone = await DeliveryZone.findOne({ _id: deliveryZone, isActive: true });
+      if (!zone) {
+        return res.status(400).json({ message: 'Invalid delivery zone id' });
+      }
+    }
 
     if (productName !== undefined) pool.productName = productName;
+    if (categoryIds !== undefined) pool.categoryIds = categoryIds;
     if (unitPrice !== undefined) pool.unitPrice = unitPrice;
     if (minQuantity !== undefined) pool.minQuantity = minQuantity;
     if (maxQuantity !== undefined) pool.maxQuantity = maxQuantity;

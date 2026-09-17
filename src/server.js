@@ -15,7 +15,9 @@ import poolRoutes from './routes/poolRoutes.js';
 import participationRoutes from './routes/participationRoutes.js';
 import purchaseOrderRoutes from './routes/purchaseOrderRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
-
+import deliveryZoneRoutes from './routes/deliveryZoneRoutes.js';
+import governorateRoutes from './routes/governorateRoutes.js';
+import transactionRoutes from './routes/transactionRoutes.js';
 // connect to the database first, before starting the server
 connectDB();
 
@@ -39,7 +41,7 @@ app.get('/', (req, res) => {
 
 app.use('/api/auth/login', authRateLimiter);
 app.use('/api/auth/register', authRateLimiter);
-
+app.use('/api/auth/forgot-password', authRateLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/shops', shopRoutes);
@@ -48,7 +50,9 @@ app.use('/api/pools', poolRoutes);
 app.use('/api/participations', participationRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/admin', adminRoutes);
-
+app.use('/api/delivery-zones', deliveryZoneRoutes);
+app.use('/api/governorates', governorateRoutes);
+app.use('/api/transactions', transactionRoutes);
 // these two MUST be registered last, after every real route above
 app.use(notFound);
 app.use(errorHandler);

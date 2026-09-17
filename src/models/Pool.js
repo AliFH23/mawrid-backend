@@ -8,25 +8,36 @@ const poolSchema = new mongoose.Schema(
       trim: true,
     },
 
-    categoryId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Category',
-      required: [true, 'Category is required'],
+    // a pool can belong to more than one category (e.g. coffee fits both "Groceries"
+    // and "Restaurants & Cafes") — same many-to-many pattern used on Shop.categoryIds
+    categoryIds: {
+      type: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'Category',
+        },
+      ],
+      validate: {
+        validator: function (value) {
+          return value.length >= 1;
+        },
+        message: 'At least one category is required',
+      },
+      required: [true, 'At least one category is required'],
     },
 
     deliveryZone: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'DeliveryZone',
       required: [true, 'Delivery zone is required'],
-      trim: true,
     },
 
     supplierId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Supplier',
-      required: [true, 'A pool must be linked to a supplier'],
+      required: [true, 'Pool must belong to a supplier'],
     },
 
-    // who scheduled this pool (an Admin or the Supplier proposing it)
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -39,21 +50,12 @@ const poolSchema = new mongoose.Schema(
       min: [0, 'Unit price cannot be negative'],
     },
 
-    // minimum quantity the supplier requires before wholesale pricing kicks in
     minQuantity: {
       type: Number,
       required: [true, 'Minimum quantity is required'],
       min: [1, 'Minimum quantity must be at least 1'],
     },
 
-    // updated automatically as shops join (sum of all active Participation quantities)
-    currentQuantity: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-
-    // hard cap to prevent the pool from exceeding what the supplier can actually fulfill
     maxQuantity: {
       type: Number,
       required: [true, 'Maximum quantity is required'],
@@ -61,20 +63,20 @@ const poolSchema = new mongoose.Schema(
         validator: function (value) {
           return value >= this.minQuantity;
         },
-        message: 'Maximum quantity must be greater than or equal to minimum quantity',
+        message: 'maxQuantity must be greater than or equal to minQuantity',
       },
+    },
+
+    currentQuantity: {
+      type: Number,
+      default: 0,
+      min: [0, 'currentQuantity cannot be negative'],
     },
 
     status: {
       type: String,
       enum: {
-        values: [
-          'OPEN',
-          'PENDING_SUPPLIER_CONFIRMATION',
-          'COMPLETED',
-          'EXPIRED',
-          'CANCELLED',
-        ],
+        values: ['OPEN', 'PENDING_SUPPLIER_CONFIRMATION', 'COMPLETED', 'EXPIRED', 'CANCELLED'],
         message: '{VALUE} is not a valid pool status',
       },
       default: 'OPEN',
@@ -90,10 +92,9 @@ const poolSchema = new mongoose.Schema(
   }
 );
 
-// convenience field, not stored in the database — handy for the frontend progress bar
+// how close the pool is to its minimum — used by the frontend progress bar
 poolSchema.virtual('completionPercentage').get(function () {
-  if (this.minQuantity === 0) return 0;
-  return Math.min(100, Math.round((this.currentQuantity / this.minQuantity) * 100));
+  return Math.min(100, (this.currentQuantity / this.minQuantity) * 100);
 });
 
 poolSchema.set('toJSON', { virtuals: true });
