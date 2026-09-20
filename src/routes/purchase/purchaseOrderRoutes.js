@@ -1,6 +1,6 @@
 import express from 'express';
-import { getMyPurchaseOrders, getAllPurchaseOrders } from '../controllers/purchaseOrderController.js';
-import { protect, authorize } from '../middleware/authMiddleware.js';
+import { getMyPurchaseOrders, getAllPurchaseOrders } from '../../controllers/purchase/purchaseOrderController.js';
+import { protect, authorize } from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
 

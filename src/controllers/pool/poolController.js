@@ -1,12 +1,12 @@
 import mongoose from 'mongoose';
-import Pool from '../models/Pool.js';
-import Transaction from '../models/Transaction.js';
-import Supplier from '../models/Supplier.js';
-import Category from '../models/Category.js';
-import DeliveryZone from '../models/DeliveryZone.js';
-import Shop from '../models/Shop.js';
-import Participation from '../models/Participation.js';
-import PurchaseOrder from '../models/PurchaseOrder.js';
+import Pool from '../../models/Pool.js';
+import Transaction from '../../models/Transaction.js';
+import Supplier from '../../models/Supplier.js';
+import Category from '../../models/Category.js';
+import DeliveryZone from '../../models/DeliveryZone.js';
+import Shop from '../../models/Shop.js';
+import Participation from '../../models/Participation.js';
+import PurchaseOrder from '../../models/PurchaseOrder.js';
 
 const COMMITMENT_FEE_RATE = 0.05;
 const MIN_RELIABILITY_SCORE_TO_CREATE_POOL = 50;
@@ -15,7 +15,7 @@ const MIN_RELIABILITY_SCORE_TO_CREATE_POOL = 50;
 // @access  Private (admin or supplier)
 export const createPool = async (req, res) => {
   try {
-    const { productName, categoryIds, deliveryZone, unitPrice, minQuantity, maxQuantity, expiryDate } = req.body;
+    const { productName, description, categoryIds, deliveryZone, unitPrice, minQuantity, maxQuantity, expiryDate } = req.body;
 
     if (!productName || !categoryIds || !categoryIds.length || !deliveryZone || !unitPrice || !minQuantity || !maxQuantity || !expiryDate) {
       return res.status(400).json({ message: 'All fields are required (including at least one category)' });
@@ -58,6 +58,7 @@ export const createPool = async (req, res) => {
 
     const pool = await Pool.create({
       productName,
+      description,
       categoryIds,
       deliveryZone,
       supplierId,
@@ -79,11 +80,10 @@ export const createPool = async (req, res) => {
 
 // @route   GET /api/pools
 // @access  Private (any logged-in user)
-// supports optional filters: ?categoryId=...&deliveryZone=...&status=OPEN&supplierId=...
 export const getPools = async (req, res) => {
   try {
     const filter = {};
-    if (req.query.categoryId) filter.categoryIds = req.query.categoryId; // matches any pool that includes this category
+    if (req.query.categoryId) filter.categoryIds = req.query.categoryId;
     if (req.query.deliveryZone) filter.deliveryZone = req.query.deliveryZone;
     if (req.query.status) filter.status = req.query.status;
     if (req.query.supplierId) filter.supplierId = req.query.supplierId;
@@ -168,6 +168,19 @@ export const joinPool = async (req, res) => {
       );
       resultParticipation = created[0];
 
+      await Transaction.create(
+        [
+          {
+            type: 'COMMITMENT_FEE_PAID',
+            amount: commitmentFeeAmount,
+            poolId: pool._id,
+            shopId: shop._id,
+            description: `رسم التزام — انضمام محل بكمية ${quantity} لسلة "${pool.productName}"`,
+          },
+        ],
+        { session }
+      );
+
       const updatedPool = await Pool.findOneAndUpdate(
         {
           _id: pool._id,
@@ -248,6 +261,19 @@ export const leavePool = async (req, res) => {
       participation.commitmentFeeStatus = 'FORFEITED';
       await participation.save({ session });
 
+      await Transaction.create(
+        [
+          {
+            type: 'COMMITMENT_FEE_FORFEITED',
+            amount: participation.commitmentFeeAmount,
+            poolId: pool._id,
+            shopId: shop._id,
+            description: `مصادرة رسم التزام — المحل انسحب طوعيًا من سلة "${pool.productName}"`,
+          },
+        ],
+        { session }
+      );
+
       pool.currentQuantity -= participation.quantity;
       if (pool.status === 'PENDING_SUPPLIER_CONFIRMATION' && pool.currentQuantity < pool.minQuantity) {
         pool.status = 'OPEN';
@@ -317,6 +343,25 @@ export const confirmPool = async (req, res) => {
       pool.status = 'COMPLETED';
       await pool.save({ session });
       resultPool = pool;
+
+      await Transaction.create(
+        [
+          {
+            type: 'SUPPLIER_COMMISSION',
+            amount: supplierCommission,
+            poolId: pool._id,
+            supplierId: pool.supplierId,
+            description: `عمولة المنصة من المورد (2%) — سلة "${pool.productName}"`,
+          },
+          {
+            type: 'BUYER_COMMISSION',
+            amount: buyersCommission,
+            poolId: pool._id,
+            description: `عمولة المنصة من المحلات (1%) — سلة "${pool.productName}"`,
+          },
+        ],
+        { session }
+      );
     });
 
     res.status(200).json({ purchaseOrder: resultPurchaseOrder, pool: resultPool });
@@ -357,9 +402,22 @@ export const rejectPool = async (req, res) => {
         }
       }
 
+      const activeParticipations = await Participation.find({ poolId: pool._id, status: 'ACTIVE' }).session(session);
+
       await Participation.updateMany(
         { poolId: pool._id, status: 'ACTIVE' },
         { commitmentFeeStatus: 'REFUNDED' },
+        { session }
+      );
+
+      await Transaction.create(
+        activeParticipations.map((p) => ({
+          type: 'COMMITMENT_FEE_REFUNDED',
+          amount: p.commitmentFeeAmount,
+          poolId: pool._id,
+          shopId: p.shopId,
+          description: `استرداد رسم التزام — المورد رفض سلة "${pool.productName}"`,
+        })),
         { session }
       );
 
@@ -431,9 +489,22 @@ export const cancelPool = async (req, res) => {
         }
       }
 
+      const activeParticipations = await Participation.find({ poolId: pool._id, status: 'ACTIVE' }).session(session);
+
       await Participation.updateMany(
         { poolId: pool._id, status: 'ACTIVE' },
         { commitmentFeeStatus: 'REFUNDED' },
+        { session }
+      );
+
+      await Transaction.create(
+        activeParticipations.map((p) => ({
+          type: 'COMMITMENT_FEE_REFUNDED',
+          amount: p.commitmentFeeAmount,
+          poolId: pool._id,
+          shopId: p.shopId,
+          description: `استرداد رسم التزام — المورد ألغى سلة "${pool.productName}"`,
+        })),
         { session }
       );
 
@@ -509,7 +580,7 @@ export const updatePool = async (req, res) => {
       }
     }
 
-    const { productName, categoryIds, unitPrice, minQuantity, maxQuantity, deliveryZone, expiryDate } = req.body;
+    const { productName, description, categoryIds, unitPrice, minQuantity, maxQuantity, deliveryZone, expiryDate } = req.body;
 
     if (categoryIds !== undefined) {
       if (!categoryIds.length) {
@@ -540,6 +611,7 @@ export const updatePool = async (req, res) => {
     }
 
     if (productName !== undefined) pool.productName = productName;
+    if (description !== undefined) pool.description = description;
     if (categoryIds !== undefined) pool.categoryIds = categoryIds;
     if (unitPrice !== undefined) pool.unitPrice = unitPrice;
     if (minQuantity !== undefined) pool.minQuantity = minQuantity;
@@ -554,6 +626,55 @@ export const updatePool = async (req, res) => {
     if (error.name === 'ValidationError') {
       return res.status(400).json({ message: error.message });
     }
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
+// @route   PUT /api/pools/:id/extend
+// @access  Private (supplier who owns this pool, or admin)
+// pushes the deadline forward without touching anything else — quantities, price,
+// participants all stay exactly as they are. Marks the pool as extended so buyers
+// see it clearly instead of just a silently-changed date.
+export const extendPool = async (req, res) => {
+  try {
+    const pool = await Pool.findById(req.params.id);
+    if (!pool) {
+      return res.status(404).json({ message: 'Pool not found' });
+    }
+
+    if (pool.status !== 'OPEN') {
+      return res.status(400).json({
+        message: `Cannot extend a pool with status ${pool.status}. Only OPEN pools can be extended.`,
+      });
+    }
+
+    if (req.user.role === 'supplier') {
+      const supplier = await Supplier.findOne({ userId: req.user._id });
+      if (!supplier || String(supplier._id) !== String(pool.supplierId)) {
+        return res.status(403).json({ message: 'You do not own this pool' });
+      }
+    }
+
+    const { newExpiryDate } = req.body;
+    if (!newExpiryDate) {
+      return res.status(400).json({ message: 'newExpiryDate is required' });
+    }
+
+    const parsedDate = new Date(newExpiryDate);
+    if (parsedDate <= new Date()) {
+      return res.status(400).json({ message: 'newExpiryDate must be in the future' });
+    }
+    if (parsedDate <= pool.expiryDate) {
+      return res.status(400).json({ message: 'newExpiryDate must be later than the current expiry date' });
+    }
+
+    pool.expiryDate = parsedDate;
+    pool.extended = true;
+    await pool.save();
+
+    res.status(200).json({ pool });
+  } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };

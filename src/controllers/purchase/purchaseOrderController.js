@@ -1,6 +1,6 @@
-import PurchaseOrder from '../models/PurchaseOrder.js';
-import Pool from '../models/Pool.js';
-import Supplier from '../models/Supplier.js';
+import PurchaseOrder from '../../models/PurchaseOrder.js';
+import Pool from '../../models/Pool.js';
+import Supplier from '../../models/Supplier.js';
 
 // @route   GET /api/purchase-orders/me
 // @access  Private (supplier only)

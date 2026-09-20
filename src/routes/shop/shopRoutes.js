@@ -1,12 +1,6 @@
 import express from 'express';
-import {
-  createShop,
-  getMyShop,
-  updateMyShop,
-  getShops,
-  getShopById,
-} from '../controllers/shopController.js';
-import { protect, authorize } from '../middleware/authMiddleware.js';
+import { createShop, getMyShop, updateMyShop, getShops, getShopById } from '../../controllers/shop/shopController.js';
+import { protect, authorize } from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
 

@@ -4,14 +4,15 @@ import {
   getPools,
   getPoolById,
   updatePool,
+  extendPool,
   joinPool,
   leavePool,
   confirmPool,
   rejectPool,
   cancelPool,
   getPoolParticipants,
-} from '../controllers/poolController.js';
-import { protect, authorize } from '../middleware/authMiddleware.js';
+} from '../../controllers/pool/poolController.js';
+import { protect, authorize } from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -19,6 +20,7 @@ router.post('/', protect, authorize('admin', 'supplier'), createPool);
 router.get('/', protect, getPools);
 router.get('/:id', protect, getPoolById);
 router.put('/:id', protect, authorize('admin', 'supplier'), updatePool);
+router.put('/:id/extend', protect, authorize('admin', 'supplier'), extendPool);
 router.get('/:id/participants', protect, authorize('admin', 'supplier'), getPoolParticipants);
 router.post('/:id/join', protect, authorize('buyer'), joinPool);
 router.delete('/:id/leave', protect, authorize('buyer'), leavePool);

@@ -1,5 +1,5 @@
-import expirePools from '../utils/expirePools.js';
-import User from '../models/User.js';
+import expirePools from '../../utils/expirePools.js';
+import User from '../../models/User.js';
 
 // @route   POST /api/admin/expire-pools
 // @access  Private (admin only)

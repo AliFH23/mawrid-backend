@@ -5,8 +5,8 @@ import {
   updateMySupplierProfile,
   getSuppliers,
   getSupplierById,
-} from '../controllers/supplierController.js';
-import { protect, authorize } from '../middleware/authMiddleware.js';
+} from '../../controllers/supplier/supplierController.js';
+import { protect, authorize } from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
 

@@ -4,12 +4,11 @@ import {
   createGovernorate,
   updateGovernorate,
   deleteGovernorate,
-} from '../controllers/governorateController.js';
-import { protect, authorize } from '../middleware/authMiddleware.js';
+} from '../../controllers/catalog/governorateController.js';
+import { protect, authorize } from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-// public — needed on the registration form before the user has an account
 router.get('/', getGovernorates);
 
 router.post('/', protect, authorize('admin'), createGovernorate);

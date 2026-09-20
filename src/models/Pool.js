@@ -8,8 +8,12 @@ const poolSchema = new mongoose.Schema(
       trim: true,
     },
 
-    // a pool can belong to more than one category (e.g. coffee fits both "Groceries"
-    // and "Restaurants & Cafes") — same many-to-many pattern used on Shop.categoryIds
+    description: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+
     categoryIds: {
       type: [
         {
@@ -86,13 +90,18 @@ const poolSchema = new mongoose.Schema(
       type: Date,
       required: [true, 'Expiry date is required'],
     },
+
+    extended: {
+      type: Boolean,
+      default: false,
+    },
+    
   },
   {
     timestamps: true,
   }
 );
 
-// how close the pool is to its minimum — used by the frontend progress bar
 poolSchema.virtual('completionPercentage').get(function () {
   return Math.min(100, (this.currentQuantity / this.minQuantity) * 100);
 });

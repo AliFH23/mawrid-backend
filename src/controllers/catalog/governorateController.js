@@ -1,4 +1,4 @@
-import Governorate from '../models/Governorate.js';
+import Governorate from '../../models/Governorate.js';
 
 // @route   GET /api/governorates
 // @access  Private (any logged-in user)

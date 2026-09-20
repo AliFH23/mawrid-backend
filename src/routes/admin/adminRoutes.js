@@ -1,6 +1,6 @@
 import express from 'express';
-import { runExpirePoolsCheck, getUsers, toggleUserStatus } from '../controllers/adminController.js';
-import { protect, authorize } from '../middleware/authMiddleware.js';
+import { runExpirePoolsCheck, getUsers, toggleUserStatus } from '../../controllers/admin/adminController.js';
+import { protect, authorize } from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
 

@@ -1,5 +1,5 @@
-import DeliveryZone from '../models/DeliveryZone.js';
-import Governorate from '../models/Governorate.js';
+import DeliveryZone from '../../models/DeliveryZone.js';
+import Governorate from '../../models/Governorate.js';
 
 // @route   GET /api/delivery-zones
 // @access  Private (any logged-in user)

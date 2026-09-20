@@ -1,6 +1,6 @@
 import express from 'express';
-import { getMyParticipations, payRemainingBalance, confirmReceipt } from '../controllers/participationController.js';
-import { protect, authorize } from '../middleware/authMiddleware.js';
+import { getMyParticipations, payRemainingBalance, confirmReceipt } from '../../controllers/pool/participationController.js';
+import { protect, authorize } from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
 

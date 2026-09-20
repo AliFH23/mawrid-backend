@@ -1,7 +1,7 @@
-import Participation from '../models/Participation.js';
-import Shop from '../models/Shop.js';
-import Pool from '../models/Pool.js';
-import Transaction from '../models/Transaction.js';
+import Participation from '../../models/Participation.js';
+import Shop from '../../models/Shop.js';
+import Pool from '../../models/Pool.js';
+import Transaction from '../../models/Transaction.js';
 
 // @route   GET /api/participations/me
 // @access  Private (buyer only)
@@ -59,17 +59,19 @@ export const payRemainingBalance = async (req, res) => {
       });
     }
 
-    participation.finalPaymentStatus = 'PAID';
-    await participation.save();
+        participation.finalPaymentStatus = 'PAID';
+        await participation.save();
 
-    const balance = participation.quantity * pool.unitPrice - participation.commitmentFeeAmount;
-    await Transaction.create({
-      type: 'FINAL_PAYMENT',
-      amount: balance,
-      poolId: pool._id,
-      shopId: shop._id,
-      description: `دفع المبلغ المتبقي — سلة "${pool.productName}"`,
-    });
+        const buyerCommission = Math.round(participation.quantity * pool.unitPrice * 0.01 * 100) / 100;
+        const balance = participation.quantity * pool.unitPrice - participation.commitmentFeeAmount + buyerCommission;
+
+        await Transaction.create({
+          type: 'FINAL_PAYMENT',
+          amount: balance,
+          poolId: pool._id,
+          shopId: shop._id,
+          description: `دفع المبلغ المتبقي (شامل عمولة منصة 1%: ${buyerCommission.toFixed(2)} د.أ) — سلة "${pool.productName}"`,
+        });
 
     res.status(200).json({ message: 'Remaining balance paid', participation });
   } catch (error) {
@@ -117,15 +119,16 @@ export const confirmReceipt = async (req, res) => {
     participation.deliveryStatus = 'DELIVERED';
     participation.deliveredAt = new Date();
 
-    if (participation.paymentMethod === 'CASH') {
+      if (participation.paymentMethod === 'CASH') {
       participation.finalPaymentStatus = 'PAID';
-      const balance = participation.quantity * pool.unitPrice - participation.commitmentFeeAmount;
+      const buyerCommission = Math.round(participation.quantity * pool.unitPrice * 0.01 * 100) / 100;
+      const balance = participation.quantity * pool.unitPrice - participation.commitmentFeeAmount + buyerCommission;
       await Transaction.create({
         type: 'FINAL_PAYMENT',
         amount: balance,
         poolId: pool._id,
         shopId: shop._id,
-        description: `دفع نقدي عند الاستلام — سلة "${pool.productName}"`,
+        description: `دفع نقدي عند الاستلام (شامل عمولة منصة 1%: ${buyerCommission.toFixed(2)} د.أ) — سلة "${pool.productName}"`,
       });
     }
 

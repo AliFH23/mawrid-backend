@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 
-const COMMISSION_RATE = 0.02; // 2% — used for both the supplier side and the buyers' side
+const SUPPLIER_COMMISSION_RATE = 0.02;
+const BUYER_COMMISSION_RATE = 0.01;
 
 const purchaseOrderSchema = new mongoose.Schema(
   {
@@ -8,13 +9,12 @@ const purchaseOrderSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Pool',
       required: [true, 'Purchase order must be linked to a pool'],
-      unique: true, // one pool produces at most one purchase order
     },
 
     totalQuantity: {
       type: Number,
       required: [true, 'Total quantity is required'],
-      min: [1, 'Total quantity must be at least 1'],
+      min: [0, 'Total quantity cannot be negative'],
     },
 
     totalAmount: {
@@ -23,28 +23,25 @@ const purchaseOrderSchema = new mongoose.Schema(
       min: [0, 'Total amount cannot be negative'],
     },
 
-    // 2% of totalAmount, paid by the supplier
     supplierCommission: {
       type: Number,
-      required: true,
-      min: 0,
+      required: [true, 'Supplier commission is required'],
+      min: [0, 'Supplier commission cannot be negative'],
     },
 
-    // 2% of totalAmount, paid collectively by participating shops
     buyersCommission: {
       type: Number,
-      required: true,
-      min: 0,
+      required: [true, 'Buyers commission is required'],
+      min: [0, 'Buyers commission cannot be negative'],
     },
 
-    // status of the supplier's final confirmation after the pool hit its minimum quantity
     status: {
       type: String,
       enum: {
-        values: ['PENDING', 'CONFIRMED', 'REJECTED'],
+        values: ['CONFIRMED', 'REJECTED'],
         message: '{VALUE} is not a valid purchase order status',
       },
-      default: 'PENDING',
+      required: [true, 'Status is required'],
     },
 
     confirmedAt: {
@@ -56,12 +53,14 @@ const purchaseOrderSchema = new mongoose.Schema(
   }
 );
 
-// calculates both commission amounts from a total order value
-// used when a Pool completes and a PurchaseOrder is created
 purchaseOrderSchema.statics.calculateCommissions = function (totalAmount) {
-  const supplierCommission = Math.round(totalAmount * COMMISSION_RATE * 100) / 100;
-  const buyersCommission = Math.round(totalAmount * COMMISSION_RATE * 100) / 100;
-  return { supplierCommission, buyersCommission };
+  return {
+    supplierCommission: Math.round(totalAmount * SUPPLIER_COMMISSION_RATE * 100) / 100,
+    buyersCommission: Math.round(totalAmount * BUYER_COMMISSION_RATE * 100) / 100,
+  };
 };
+
+purchaseOrderSchema.statics.SUPPLIER_COMMISSION_RATE = SUPPLIER_COMMISSION_RATE;
+purchaseOrderSchema.statics.BUYER_COMMISSION_RATE = BUYER_COMMISSION_RATE;
 
 export default mongoose.model('PurchaseOrder', purchaseOrderSchema);

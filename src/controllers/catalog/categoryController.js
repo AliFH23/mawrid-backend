@@ -1,4 +1,4 @@
-import Category from '../models/Category.js';
+import Category from '../../models/Category.js';
 
 // @route   GET /api/categories
 // @access  Private (any logged-in user)

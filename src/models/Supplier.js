@@ -2,12 +2,11 @@ import mongoose from 'mongoose';
 
 const supplierSchema = new mongoose.Schema(
   {
-    // link to the underlying account (role must be "supplier")
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: [true, 'A supplier profile must be linked to a user'],
-      unique: true, // one user = one supplier profile
+      unique: true,
     },
 
     companyName: {
@@ -16,11 +15,17 @@ const supplierSchema = new mongoose.Schema(
       trim: true,
     },
 
-    // tracks how often this supplier confirms vs rejects completed pools
-    // used to throttle or block unreliable suppliers from opening new pools
+    // free-text bio: what the company does, what they typically supply — shown on
+    // their own profile page so buyers/admin get more context than just the name
+    companyDescription: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+
     reliabilityScore: {
       type: Number,
-      default: 100, // starts at 100, drops with each rejection after pool completion
+      default: 100,
       min: 0,
       max: 100,
     },

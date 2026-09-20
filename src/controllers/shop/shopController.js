@@ -1,6 +1,6 @@
-import Shop from '../models/Shop.js';
-import Category from '../models/Category.js';
-import DeliveryZone from '../models/DeliveryZone.js';
+import Shop from '../../models/Shop.js';
+import Category from '../../models/Category.js';
+import DeliveryZone from '../../models/DeliveryZone.js';
 
 // nested populate used everywhere below: shop.deliveryZone.governorateId comes back
 // as a full { _id, name } object, not just a raw id — this is what lets the frontend

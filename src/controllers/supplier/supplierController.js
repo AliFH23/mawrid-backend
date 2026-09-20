@@ -1,4 +1,4 @@
-import Supplier from '../models/Supplier.js';
+import Supplier from '../../models/Supplier.js';
 
 // @route   POST /api/suppliers
 // @access  Private (supplier only)
@@ -8,7 +8,7 @@ export const createSupplier = async (req, res) => {
       return res.status(403).json({ message: 'Only supplier accounts can create a supplier profile' });
     }
 
-    const { companyName } = req.body;
+    const { companyName, companyDescription } = req.body;
 
     if (!companyName) {
       return res.status(400).json({ message: 'companyName is required' });
@@ -22,6 +22,7 @@ export const createSupplier = async (req, res) => {
     const supplier = await Supplier.create({
       userId: req.user._id,
       companyName,
+      companyDescription,
     });
 
     res.status(201).json({ supplier });
@@ -53,11 +54,11 @@ export const getMySupplierProfile = async (req, res) => {
 // @access  Private (supplier only)
 export const updateMySupplierProfile = async (req, res) => {
   try {
-    const { companyName } = req.body;
+    const { companyName, companyDescription } = req.body;
 
     const supplier = await Supplier.findOneAndUpdate(
       { userId: req.user._id },
-      { companyName },
+      { companyName, companyDescription },
       { new: true, runValidators: true }
     );
 
@@ -81,8 +82,6 @@ export const getSuppliers = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
-
-
 
 // @route   GET /api/suppliers/:id
 // @access  Private (admin only)

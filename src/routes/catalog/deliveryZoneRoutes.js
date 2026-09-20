@@ -4,12 +4,11 @@ import {
   createDeliveryZone,
   updateDeliveryZone,
   deleteDeliveryZone,
-} from '../controllers/deliveryZoneController.js';
-import { protect, authorize } from '../middleware/authMiddleware.js';
+} from '../../controllers/catalog/deliveryZoneController.js';
+import { protect, authorize } from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-// public — needed on the registration form before the user has an account
 router.get('/', getDeliveryZones);
 
 router.post('/', protect, authorize('admin'), createDeliveryZone);
