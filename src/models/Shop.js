@@ -16,6 +16,12 @@ const shopSchema = new mongoose.Schema(
       trim: true,
     },
 
+    commercialRegistrationNumber: {
+      type: String,
+      required: [true, 'Commercial registration number is required'],
+      trim: true,
+    },
+
     // many-to-many with Category, capped at 3
     categoryIds: {
       type: [

@@ -2,10 +2,6 @@ import Shop from '../../models/Shop.js';
 import Category from '../../models/Category.js';
 import DeliveryZone from '../../models/DeliveryZone.js';
 
-// nested populate used everywhere below: shop.deliveryZone.governorateId comes back
-// as a full { _id, name } object, not just a raw id — this is what lets the frontend
-// pre-select "current governorate" correctly on the settings page instead of showing
-// an empty field that looks like you're adding a brand new one
 const DELIVERY_ZONE_POPULATE = { path: 'deliveryZone', populate: { path: 'governorateId' } };
 
 // @route   POST /api/shops
@@ -16,10 +12,13 @@ export const createShop = async (req, res) => {
       return res.status(403).json({ message: 'Only buyer accounts can create a shop' });
     }
 
-    const { shopName, categoryIds, deliveryZone } = req.body;
+    const { shopName, commercialRegistrationNumber, categoryIds, deliveryZone } = req.body;
 
     if (!shopName || !categoryIds || !deliveryZone) {
       return res.status(400).json({ message: 'shopName, categoryIds, and deliveryZone are required' });
+    }
+    if (!commercialRegistrationNumber) {
+      return res.status(400).json({ message: 'commercialRegistrationNumber is required' });
     }
 
     const existingShop = await Shop.findOne({ userId: req.user._id });
@@ -43,6 +42,7 @@ export const createShop = async (req, res) => {
     const shop = await Shop.create({
       userId: req.user._id,
       shopName,
+      commercialRegistrationNumber,
       categoryIds,
       deliveryZone,
     });
@@ -80,7 +80,7 @@ export const getMyShop = async (req, res) => {
 // @access  Private (buyer only)
 export const updateMyShop = async (req, res) => {
   try {
-    const { shopName, categoryIds, deliveryZone } = req.body;
+    const { shopName, commercialRegistrationNumber, categoryIds, deliveryZone } = req.body;
 
     if (categoryIds) {
       const validCategories = await Category.find({
@@ -101,7 +101,7 @@ export const updateMyShop = async (req, res) => {
 
     const shop = await Shop.findOneAndUpdate(
       { userId: req.user._id },
-      { shopName, categoryIds, deliveryZone },
+      { shopName, commercialRegistrationNumber, categoryIds, deliveryZone },
       { new: true, runValidators: true }
     )
       .populate('categoryIds')

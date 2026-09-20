@@ -22,6 +22,13 @@ const supplierSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    
+    
+    commercialRegistrationNumber: {
+      type: String,
+      required: [true, 'Commercial registration number is required'],
+      trim: true,
+    },
 
     reliabilityScore: {
       type: Number,

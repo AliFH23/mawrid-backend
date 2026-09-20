@@ -8,10 +8,13 @@ export const createSupplier = async (req, res) => {
       return res.status(403).json({ message: 'Only supplier accounts can create a supplier profile' });
     }
 
-    const { companyName, companyDescription } = req.body;
+    const { companyName, companyDescription, commercialRegistrationNumber } = req.body;
 
     if (!companyName) {
       return res.status(400).json({ message: 'companyName is required' });
+    }
+    if (!commercialRegistrationNumber) {
+      return res.status(400).json({ message: 'commercialRegistrationNumber is required' });
     }
 
     const existingSupplier = await Supplier.findOne({ userId: req.user._id });
@@ -23,6 +26,7 @@ export const createSupplier = async (req, res) => {
       userId: req.user._id,
       companyName,
       companyDescription,
+      commercialRegistrationNumber,
     });
 
     res.status(201).json({ supplier });
@@ -54,11 +58,11 @@ export const getMySupplierProfile = async (req, res) => {
 // @access  Private (supplier only)
 export const updateMySupplierProfile = async (req, res) => {
   try {
-    const { companyName, companyDescription } = req.body;
+    const { companyName, companyDescription, commercialRegistrationNumber } = req.body;
 
     const supplier = await Supplier.findOneAndUpdate(
       { userId: req.user._id },
-      { companyName, companyDescription },
+      { companyName, companyDescription, commercialRegistrationNumber },
       { new: true, runValidators: true }
     );
 
