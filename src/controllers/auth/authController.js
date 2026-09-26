@@ -1,6 +1,22 @@
 import User from '../../models/User.js';
 import generateToken from '../../utils/generateToken.js';
 
+// @route   GET /api/auth/check-email
+// @access  Public
+export const checkEmailAvailability = async (req, res) => {
+  try {
+    const { email } = req.query;
+    if (!email) {
+      return res.status(400).json({ message: 'email is required' });
+    }
+
+    const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
+    res.status(200).json({ available: !existingUser });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // @route   POST /api/auth/register
 // @access  Public
 export const registerUser = async (req, res) => {
@@ -70,10 +86,6 @@ export const getMe = async (req, res) => {
 
 // @route   POST /api/auth/forgot-password
 // @access  Public
-//
-// SECURITY NOTE: this is a simplified, no-external-service reset flow — it verifies
-// identity using the phone number already on file instead of emailing/texting a one-time
-// code. This is weaker than a real OTP flow, but requires no third-party service.
 export const forgotPassword = async (req, res) => {
   try {
     const { email, phone, newPassword } = req.body;
@@ -88,13 +100,11 @@ export const forgotPassword = async (req, res) => {
 
     const user = await User.findOne({ email });
 
-    // deliberately vague error — doesn't reveal whether the email exists at all,
-    // only whether the email+phone combination matches
     if (!user || user.phone !== phone) {
       return res.status(400).json({ message: 'No account matches this email and phone number' });
     }
 
-    user.password = newPassword; // the pre('save') hook in User.js re-hashes it automatically
+    user.password = newPassword;
     await user.save();
 
     res.status(200).json({ message: 'Password updated successfully. You can now log in.' });

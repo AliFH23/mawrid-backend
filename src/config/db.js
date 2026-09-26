@@ -1,4 +1,11 @@
 import mongoose from 'mongoose';
+import dns from 'dns';
+
+// forces Node's own DNS resolver to use Google/Cloudflare DNS directly, bypassing
+// whatever the OS-level resolver is doing — works around a known Node.js-on-Windows
+// bug where SRV lookups (which MongoDB Atlas's mongodb+srv:// URIs depend on) fail
+// even when the OS's own DNS resolution works fine (confirmed via nslookup)
+dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 const connectDB = async () => {
   try {

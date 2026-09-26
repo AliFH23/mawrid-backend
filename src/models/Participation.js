@@ -71,6 +71,11 @@ const participationSchema = new mongoose.Schema(
       default: 'PENDING_DELIVERY',
     },
 
+    rated: {
+      type: Boolean,
+      default: false,
+    },
+
     deliveredAt: {
       type: Date,
     },

@@ -44,6 +44,11 @@ const purchaseOrderSchema = new mongoose.Schema(
       required: [true, 'Status is required'],
     },
 
+    rejectionReason: {
+      type: String,
+      trim: true,
+    },
+
     confirmedAt: {
       type: Date,
     },

@@ -19,6 +19,10 @@ import deliveryZoneRoutes from './routes/catalog/deliveryZoneRoutes.js';
 import governorateRoutes from './routes/catalog/governorateRoutes.js';
 import transactionRoutes from './routes/purchase/transactionRoutes.js';
 import contactRoutes from './routes/contact/contactRoutes.js';
+import settingsRoutes from './routes/admin/settingsRoutes.js';
+import finesRoutes from './routes/admin/finesRoutes.js';
+import ratingRoutes from './routes/pool/ratingRoutes.js';
+
 connectDB();
 
 const app = express();
@@ -50,6 +54,9 @@ app.use('/api/delivery-zones', deliveryZoneRoutes);
 app.use('/api/governorates', governorateRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/contact-messages', contactRoutes);
+app.use('/api/settings', settingsRoutes);
+app.use('/api/fines', finesRoutes);
+app.use('/api/ratings', ratingRoutes);
 app.use(notFound);
 app.use(errorHandler);
 
@@ -57,9 +64,14 @@ const PORT = process.env.PORT || 5000;
 const server = app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 
-  expirePools();
-  const EXPIRE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
-  setInterval(expirePools, EXPIRE_CHECK_INTERVAL_MS);
+  // run once on startup, then repeat automatically every hour — wrapped in .catch so
+  // one bad/legacy document (e.g. an old pool missing a field added later) doesn't
+  // crash the entire server via an unhandled promise rejection
+  expirePools().catch((err) => console.error('expirePools failed:', err.message));
+  const EXPIRE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+  setInterval(() => {
+    expirePools().catch((err) => console.error('expirePools failed:', err.message));
+  }, EXPIRE_CHECK_INTERVAL_MS);
 });
 
 process.on('unhandledRejection', (err) => {

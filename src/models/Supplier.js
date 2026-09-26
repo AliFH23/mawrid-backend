@@ -29,6 +29,18 @@ const supplierSchema = new mongoose.Schema(
       required: [true, 'Commercial registration number is required'],
       trim: true,
     },
+    
+    averageRating: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 5,
+    },
+
+    ratingCount: {
+      type: Number,
+      default: 0,
+    },
 
     reliabilityScore: {
       type: Number,

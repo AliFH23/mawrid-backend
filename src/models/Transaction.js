@@ -12,6 +12,8 @@ const transactionSchema = new mongoose.Schema(
           'FINAL_PAYMENT',
           'SUPPLIER_COMMISSION',
           'BUYER_COMMISSION',
+          'LOYALTY_DISCOUNT_APPLIED',
+          'CASHBACK_EARNED',
         ],
         message: '{VALUE} is not a valid transaction type',
       },

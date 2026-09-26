@@ -1,15 +1,17 @@
 import mongoose from 'mongoose';
 import Pool from '../../models/Pool.js';
 import Transaction from '../../models/Transaction.js';
+import Fine from '../../models/Fine.js';
 import Supplier from '../../models/Supplier.js';
 import Category from '../../models/Category.js';
 import DeliveryZone from '../../models/DeliveryZone.js';
 import Shop from '../../models/Shop.js';
 import Participation from '../../models/Participation.js';
 import PurchaseOrder from '../../models/PurchaseOrder.js';
+import PlatformSettings from '../../models/PlatformSettings.js';
 
-const COMMITMENT_FEE_RATE = 0.05;
 const MIN_RELIABILITY_SCORE_TO_CREATE_POOL = 50;
+const RELIABILITY_PENALTY_PER_REJECTION = 10;
 
 // @route   POST /api/pools
 // @access  Private (admin or supplier)
@@ -135,6 +137,8 @@ export const joinPool = async (req, res) => {
       return res.status(400).json({ message: 'You need a shop profile before joining a pool' });
     }
 
+    const settings = await PlatformSettings.getSingleton();
+
     let resultParticipation;
     let resultPool;
 
@@ -152,7 +156,16 @@ export const joinPool = async (req, res) => {
         throw { httpStatus: 400, message: 'This pool has expired' };
       }
 
-      const commitmentFeeAmount = Math.round(quantity * pool.unitPrice * COMMITMENT_FEE_RATE * 100) / 100;
+      // enforce the "genuine pooling" rule using the admin-configurable share cap
+      const maxAllowedForOneShop = Math.max(1, Math.floor(pool.minQuantity * settings.maxSharePerShop));
+      if (quantity > maxAllowedForOneShop) {
+        throw {
+          httpStatus: 400,
+          message: `للحفاظ على مبدأ التجميع بين عدة محلات، أقصى كمية مسموحة لمحل واحد بهالسلة هي ${maxAllowedForOneShop} قطعة (${Math.round(settings.maxSharePerShop * 100)}% من الحد الأدنى). الباقي لازم يجي من محلات تانية.`,
+        };
+      }
+
+      const commitmentFeeAmount = Math.round(quantity * pool.unitPrice * settings.commitmentFeeRate * 100) / 100;
 
       const created = await Participation.create(
         [
@@ -175,7 +188,7 @@ export const joinPool = async (req, res) => {
             amount: commitmentFeeAmount,
             poolId: pool._id,
             shopId: shop._id,
-            description: `رسم التزام — انضمام محل بكمية ${quantity} لسلة "${pool.productName}"`,
+            description: `رسم التزام (${Math.round(settings.commitmentFeeRate * 100)}%) — انضمام محل بكمية ${quantity} لسلة "${pool.productName}"`,
           },
         ],
         { session }
@@ -300,6 +313,7 @@ export const confirmPool = async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
+    const settings = await PlatformSettings.getSingleton();
     let resultPurchaseOrder;
     let resultPool;
 
@@ -322,7 +336,8 @@ export const confirmPool = async (req, res) => {
 
       const totalQuantity = pool.currentQuantity;
       const totalAmount = totalQuantity * pool.unitPrice;
-      const { supplierCommission, buyersCommission } = PurchaseOrder.calculateCommissions(totalAmount);
+      const supplierCommission = Math.round(totalAmount * settings.supplierCommissionRate * 100) / 100;
+      const buyersCommission = Math.round(totalAmount * settings.buyerCommissionRate * 100) / 100;
 
       const created = await PurchaseOrder.create(
         [
@@ -351,13 +366,13 @@ export const confirmPool = async (req, res) => {
             amount: supplierCommission,
             poolId: pool._id,
             supplierId: pool.supplierId,
-            description: `عمولة المنصة من المورد (2%) — سلة "${pool.productName}"`,
+            description: `عمولة المنصة من المورد (${Math.round(settings.supplierCommissionRate * 100)}%) — سلة "${pool.productName}"`,
           },
           {
             type: 'BUYER_COMMISSION',
             amount: buyersCommission,
             poolId: pool._id,
-            description: `عمولة المنصة من المحلات (1%) — سلة "${pool.productName}"`,
+            description: `عمولة المنصة من المحلات (${Math.round(settings.buyerCommissionRate * 100)}%) — سلة "${pool.productName}"`,
           },
         ],
         { session }
@@ -377,10 +392,18 @@ export const confirmPool = async (req, res) => {
 
 // @route   POST /api/pools/:id/reject
 // @access  Private (supplier who owns this pool, or admin)
+// now requires a reason — this both documents WHY for the buyers who trusted this
+// pool, and becomes the formal Fine record that can legitimately be referred to the
+// Chamber of Commerce if the supplier's violations continue
 export const rejectPool = async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
+    const { reason } = req.body;
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ message: 'A rejection reason is required' });
+    }
+
     let resultPool;
 
     await session.withTransaction(async () => {
@@ -416,7 +439,7 @@ export const rejectPool = async (req, res) => {
           amount: p.commitmentFeeAmount,
           poolId: pool._id,
           shopId: p.shopId,
-          description: `استرداد رسم التزام — المورد رفض سلة "${pool.productName}"`,
+          description: `استرداد رسم التزام — المورد رفض سلة "${pool.productName}" (السبب: ${reason.trim()})`,
         })),
         { session }
       );
@@ -430,6 +453,7 @@ export const rejectPool = async (req, res) => {
             supplierCommission: 0,
             buyersCommission: 0,
             status: 'REJECTED',
+            rejectionReason: reason.trim(),
           },
         ],
         { session }
@@ -440,8 +464,20 @@ export const rejectPool = async (req, res) => {
 
       if (supplier) {
         supplier.rejectionCount += 1;
-        supplier.reliabilityScore = Math.max(0, supplier.reliabilityScore - 10);
+        supplier.reliabilityScore = Math.max(0, supplier.reliabilityScore - RELIABILITY_PENALTY_PER_REJECTION);
         await supplier.save({ session });
+
+        await Fine.create(
+          [
+            {
+              supplierId: supplier._id,
+              poolId: pool._id,
+              reason: `رفض سلة "${pool.productName}" بعد وصولها للحد الأدنى — سبب المورد: ${reason.trim()}`,
+              reliabilityScorePenalty: RELIABILITY_PENALTY_PER_REJECTION,
+            },
+          ],
+          { session }
+        );
       }
 
       resultPool = pool;
@@ -630,12 +666,8 @@ export const updatePool = async (req, res) => {
   }
 };
 
-
 // @route   PUT /api/pools/:id/extend
 // @access  Private (supplier who owns this pool, or admin)
-// pushes the deadline forward without touching anything else — quantities, price,
-// participants all stay exactly as they are. Marks the pool as extended so buyers
-// see it clearly instead of just a silently-changed date.
 export const extendPool = async (req, res) => {
   try {
     const pool = await Pool.findById(req.params.id);

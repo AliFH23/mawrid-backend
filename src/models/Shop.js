@@ -22,6 +22,14 @@ const shopSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // accumulates from cashback earned on non-cash payments — informational for now,
+    // shown to the shop as a running balance (not yet auto-redeemable)
+    cashbackBalance: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     // many-to-many with Category, capped at 3
     categoryIds: {
       type: [
