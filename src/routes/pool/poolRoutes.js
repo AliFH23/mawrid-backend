@@ -5,6 +5,9 @@ import {
   getPoolById,
   updatePool,
   extendPool,
+  increaseMaxQuantity,
+  increaseMinQuantity,
+  increaseParticipation,
   joinPool,
   leavePool,
   confirmPool,
@@ -21,6 +24,9 @@ router.get('/', protect, getPools);
 router.get('/:id', protect, getPoolById);
 router.put('/:id', protect, authorize('admin', 'supplier'), updatePool);
 router.put('/:id/extend', protect, authorize('admin', 'supplier'), extendPool);
+router.put('/:id/increase-max', protect, authorize('admin', 'supplier'), increaseMaxQuantity);
+router.put('/:id/increase-min', protect, authorize('admin', 'supplier'), increaseMinQuantity);
+router.put('/:id/increase-participation', protect, authorize('buyer'), increaseParticipation);
 router.get('/:id/participants', protect, authorize('admin', 'supplier'), getPoolParticipants);
 router.post('/:id/join', protect, authorize('buyer'), joinPool);
 router.delete('/:id/leave', protect, authorize('buyer'), leavePool);

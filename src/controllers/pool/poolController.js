@@ -156,12 +156,11 @@ export const joinPool = async (req, res) => {
         throw { httpStatus: 400, message: 'This pool has expired' };
       }
 
-      // enforce the "genuine pooling" rule using the admin-configurable share cap
       const maxAllowedForOneShop = Math.max(1, Math.floor(pool.minQuantity * settings.maxSharePerShop));
       if (quantity > maxAllowedForOneShop) {
         throw {
           httpStatus: 400,
-          message: `للحفاظ على مبدأ التجميع بين عدة محلات، أقصى كمية مسموحة لمحل واحد بهالسلة هي ${maxAllowedForOneShop} قطعة (${Math.round(settings.maxSharePerShop * 100)}% من الحد الأدنى). الباقي لازم يجي من محلات تانية.`,
+          message: `للحفاظ على مبدأ التجميع بين عدة محلات، أقصى كمية مسموحة لمحل واحد بهالسلة هي ${maxAllowedForOneShop} قطعة (${Math.round(settings.maxSharePerShop * 100)}% من الحد الأدنى). استني المورد يرفع الحد الأدنى، أو قلّلي طلبك.`,
         };
       }
 
@@ -206,8 +205,6 @@ export const joinPool = async (req, res) => {
       );
 
       if (!updatedPool) {
-        // give the buyer a precise, actionable number instead of a flat rejection —
-        // and point them toward waiting for the supplier to raise the cap
         const freshPool = await Pool.findById(pool._id).session(session);
         const remaining = Math.max(0, freshPool.maxQuantity - freshPool.currentQuantity);
         throw {
@@ -237,6 +234,129 @@ export const joinPool = async (req, res) => {
     }
     if (error.name === 'ValidationError') {
       return res.status(400).json({ message: error.message });
+    }
+    res.status(500).json({ message: error.message });
+  } finally {
+    session.endSession();
+  }
+};
+
+// @route   PUT /api/pools/:id/increase-participation
+// @access  Private (buyer only)
+// lets a shop that already joined add MORE quantity to their existing commitment —
+// closes the loop with increaseMinQuantity: raising the minimum only helps a shop
+// that genuinely wants more if that shop can actually act on it afterward. Only
+// works while the pool is still OPEN, and pays an additional commitment fee
+// proportional to just the added quantity.
+export const increaseParticipation = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    const { additionalQuantity, paymentMethod } = req.body;
+
+    if (!additionalQuantity || additionalQuantity < 1) {
+      return res.status(400).json({ message: 'A valid additionalQuantity is required' });
+    }
+
+    const shop = await Shop.findOne({ userId: req.user._id });
+    if (!shop) {
+      return res.status(400).json({ message: 'No shop found for this user' });
+    }
+
+    const settings = await PlatformSettings.getSingleton();
+
+    let resultParticipation;
+    let resultPool;
+
+    await session.withTransaction(async () => {
+      const pool = await Pool.findById(req.params.id).session(session);
+      if (!pool) {
+        throw { httpStatus: 404, message: 'Pool not found' };
+      }
+
+      if (pool.status !== 'OPEN') {
+        throw { httpStatus: 400, message: `Cannot increase quantity on a pool with status ${pool.status}` };
+      }
+
+      if (new Date() > pool.expiryDate) {
+        throw { httpStatus: 400, message: 'This pool has expired' };
+      }
+
+      const participation = await Participation.findOne({
+        poolId: pool._id,
+        shopId: shop._id,
+        status: 'ACTIVE',
+      }).session(session);
+
+      if (!participation) {
+        throw { httpStatus: 404, message: 'You have not joined this pool yet' };
+      }
+
+      const newTotalQuantity = participation.quantity + additionalQuantity;
+      const maxAllowedForOneShop = Math.max(1, Math.floor(pool.minQuantity * settings.maxSharePerShop));
+      if (newTotalQuantity > maxAllowedForOneShop) {
+        throw {
+          httpStatus: 400,
+          message: `أقصى كمية مسموحة لمحلك بهالسلة ${maxAllowedForOneShop} قطعة — عندك أصلًا ${participation.quantity}، فأقصى إضافة ممكنة هلق ${Math.max(0, maxAllowedForOneShop - participation.quantity)} قطعة.`,
+        };
+      }
+
+      const additionalFee = Math.round(additionalQuantity * pool.unitPrice * settings.commitmentFeeRate * 100) / 100;
+
+      participation.quantity = newTotalQuantity;
+      participation.commitmentFeeAmount += additionalFee;
+      if (paymentMethod) participation.paymentMethod = paymentMethod;
+      await participation.save({ session });
+      resultParticipation = participation;
+
+      await Transaction.create(
+        [
+          {
+            type: 'COMMITMENT_FEE_PAID',
+            amount: additionalFee,
+            poolId: pool._id,
+            shopId: shop._id,
+            description: `رسم التزام إضافي (${Math.round(settings.commitmentFeeRate * 100)}%) — زيادة كمية محل بـ${additionalQuantity} قطعة لسلة "${pool.productName}"`,
+          },
+        ],
+        { session }
+      );
+
+      const updatedPool = await Pool.findOneAndUpdate(
+        {
+          _id: pool._id,
+          status: 'OPEN',
+          expiryDate: { $gt: new Date() },
+          $expr: { $lte: [{ $add: ['$currentQuantity', additionalQuantity] }, '$maxQuantity'] },
+        },
+        { $inc: { currentQuantity: additionalQuantity } },
+        { new: true, session }
+      );
+
+      if (!updatedPool) {
+        const freshPool = await Pool.findById(pool._id).session(session);
+        const remaining = Math.max(0, freshPool.maxQuantity - freshPool.currentQuantity);
+        throw {
+          httpStatus: 400,
+          message:
+            remaining > 0
+              ? `ما في مكان كافي بالسلة لهالإضافة — الكمية المتبقية ${remaining} قطعة بس.`
+              : 'السلة وصلت للحد الأقصى بالكامل.',
+        };
+      }
+
+      if (updatedPool.currentQuantity >= updatedPool.minQuantity && updatedPool.status === 'OPEN') {
+        updatedPool.status = 'PENDING_SUPPLIER_CONFIRMATION';
+        await updatedPool.save({ session });
+      }
+
+      resultPool = updatedPool;
+    });
+
+    res.status(200).json({ participation: resultParticipation, pool: resultPool });
+  } catch (error) {
+    if (error.httpStatus) {
+      return res.status(error.httpStatus).json({ message: error.message });
     }
     res.status(500).json({ message: error.message });
   } finally {
@@ -717,8 +837,6 @@ export const extendPool = async (req, res) => {
 
 // @route   PUT /api/pools/:id/increase-max
 // @access  Private (supplier who owns this pool, or admin)
-// mirrors extendPool: pushes maxQuantity up when demand outpaces the current cap on
-// an OPEN pool, without touching price, minimum, or anything else already committed
 export const increaseMaxQuantity = async (req, res) => {
   try {
     const pool = await Pool.findById(req.params.id);
@@ -748,6 +866,51 @@ export const increaseMaxQuantity = async (req, res) => {
     }
 
     pool.maxQuantity = newMaxQuantity;
+    await pool.save();
+
+    res.status(200).json({ pool });
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ message: error.message });
+    }
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @route   PUT /api/pools/:id/increase-min
+// @access  Private (supplier who owns this pool, or admin)
+export const increaseMinQuantity = async (req, res) => {
+  try {
+    const pool = await Pool.findById(req.params.id);
+    if (!pool) {
+      return res.status(404).json({ message: 'Pool not found' });
+    }
+
+    if (pool.status !== 'OPEN') {
+      return res.status(400).json({
+        message: `Cannot increase the minimum quantity of a pool with status ${pool.status}. Only OPEN pools can be adjusted.`,
+      });
+    }
+
+    if (req.user.role === 'supplier') {
+      const supplier = await Supplier.findOne({ userId: req.user._id });
+      if (!supplier || String(supplier._id) !== String(pool.supplierId)) {
+        return res.status(403).json({ message: 'You do not own this pool' });
+      }
+    }
+
+    const { newMinQuantity } = req.body;
+    if (!newMinQuantity) {
+      return res.status(400).json({ message: 'newMinQuantity is required' });
+    }
+    if (newMinQuantity <= pool.minQuantity) {
+      return res.status(400).json({ message: 'newMinQuantity must be greater than the current minQuantity' });
+    }
+    if (newMinQuantity > pool.maxQuantity) {
+      return res.status(400).json({ message: 'newMinQuantity cannot exceed maxQuantity' });
+    }
+
+    pool.minQuantity = newMinQuantity;
     await pool.save();
 
     res.status(200).json({ pool });
