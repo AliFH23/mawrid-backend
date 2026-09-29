@@ -12,7 +12,7 @@ const isDemoMode = process.env.DEMO_MODE === 'true';
 
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10,
+  max: 700,
   message: { message: 'Too many attempts from this IP, please try again in 15 minutes' },
   standardHeaders: true,
   legacyHeaders: false,

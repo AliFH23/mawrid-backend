@@ -206,9 +206,16 @@ export const joinPool = async (req, res) => {
       );
 
       if (!updatedPool) {
+        // give the buyer a precise, actionable number instead of a flat rejection —
+        // and point them toward waiting for the supplier to raise the cap
+        const freshPool = await Pool.findById(pool._id).session(session);
+        const remaining = Math.max(0, freshPool.maxQuantity - freshPool.currentQuantity);
         throw {
           httpStatus: 400,
-          message: 'This pool no longer has room for that quantity (it may have just filled up)',
+          message:
+            remaining > 0
+              ? `الكمية المتبقية بهالسلة ${remaining} قطعة بس — قلّلي طلبك، أو استني المورد يرفع الحد الأقصى.`
+              : 'هالسلة وصلت للحد الأقصى بالكامل — استني المورد يرفع الحد الأقصى قبل ما تحاولي تنضمي.',
         };
       }
 
@@ -375,7 +382,7 @@ export const confirmPool = async (req, res) => {
             description: `عمولة المنصة من المحلات (${Math.round(settings.buyerCommissionRate * 100)}%) — سلة "${pool.productName}"`,
           },
         ],
-        { session }
+        { session, ordered: true }
       );
     });
 
@@ -392,9 +399,6 @@ export const confirmPool = async (req, res) => {
 
 // @route   POST /api/pools/:id/reject
 // @access  Private (supplier who owns this pool, or admin)
-// now requires a reason — this both documents WHY for the buyers who trusted this
-// pool, and becomes the formal Fine record that can legitimately be referred to the
-// Chamber of Commerce if the supplier's violations continue
 export const rejectPool = async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -441,7 +445,7 @@ export const rejectPool = async (req, res) => {
           shopId: p.shopId,
           description: `استرداد رسم التزام — المورد رفض سلة "${pool.productName}" (السبب: ${reason.trim()})`,
         })),
-        { session }
+        { session, ordered: true }
       );
 
       await PurchaseOrder.create(
@@ -541,7 +545,7 @@ export const cancelPool = async (req, res) => {
           shopId: p.shopId,
           description: `استرداد رسم التزام — المورد ألغى سلة "${pool.productName}"`,
         })),
-        { session }
+        { session, ordered: true }
       );
 
       pool.status = 'CANCELLED';
@@ -707,6 +711,50 @@ export const extendPool = async (req, res) => {
 
     res.status(200).json({ pool });
   } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @route   PUT /api/pools/:id/increase-max
+// @access  Private (supplier who owns this pool, or admin)
+// mirrors extendPool: pushes maxQuantity up when demand outpaces the current cap on
+// an OPEN pool, without touching price, minimum, or anything else already committed
+export const increaseMaxQuantity = async (req, res) => {
+  try {
+    const pool = await Pool.findById(req.params.id);
+    if (!pool) {
+      return res.status(404).json({ message: 'Pool not found' });
+    }
+
+    if (pool.status !== 'OPEN') {
+      return res.status(400).json({
+        message: `Cannot increase the max quantity of a pool with status ${pool.status}. Only OPEN pools can be adjusted.`,
+      });
+    }
+
+    if (req.user.role === 'supplier') {
+      const supplier = await Supplier.findOne({ userId: req.user._id });
+      if (!supplier || String(supplier._id) !== String(pool.supplierId)) {
+        return res.status(403).json({ message: 'You do not own this pool' });
+      }
+    }
+
+    const { newMaxQuantity } = req.body;
+    if (!newMaxQuantity) {
+      return res.status(400).json({ message: 'newMaxQuantity is required' });
+    }
+    if (newMaxQuantity <= pool.maxQuantity) {
+      return res.status(400).json({ message: 'newMaxQuantity must be greater than the current maxQuantity' });
+    }
+
+    pool.maxQuantity = newMaxQuantity;
+    await pool.save();
+
+    res.status(200).json({ pool });
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: error.message });
   }
 };
