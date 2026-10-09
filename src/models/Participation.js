@@ -62,13 +62,23 @@ const participationSchema = new mongoose.Schema(
       default: 'ACTIVE',
     },
 
+    // PENDING_DELIVERY -> (supplier ships) -> OUT_FOR_DELIVERY -> (buyer confirms) -> DELIVERED
     deliveryStatus: {
       type: String,
       enum: {
-        values: ['PENDING_DELIVERY', 'DELIVERED'],
+        values: ['PENDING_DELIVERY', 'OUT_FOR_DELIVERY', 'DELIVERED'],
         message: '{VALUE} is not a valid delivery status',
       },
       default: 'PENDING_DELIVERY',
+    },
+
+    // set by the supplier when the shipment leaves; the expected date is optional
+    shippedAt: {
+      type: Date,
+    },
+
+    expectedDeliveryDate: {
+      type: Date,
     },
 
     rated: {

@@ -4,6 +4,7 @@ import Shop from '../../models/Shop.js';
 import Pool from '../../models/Pool.js';
 import Transaction from '../../models/Transaction.js';
 import PlatformSettings from '../../models/PlatformSettings.js';
+import Supplier from '../../models/Supplier.js';
 
 // loyalty tiers — based on a shop's total historical PAID quantity across every
 // completed order ever (not just this pool). The more a shop keeps growing its
@@ -209,6 +210,11 @@ export const confirmReceipt = async (req, res) => {
       return res.status(400).json({ message: 'Receipt has already been confirmed for this participation' });
     }
 
+    // a shop can only confirm receipt of something the supplier actually shipped
+    if (participation.deliveryStatus !== 'OUT_FOR_DELIVERY') {
+      return res.status(400).json({ message: 'Please wait until the supplier marks this order as shipped' });
+    }
+
     if (participation.paymentMethod !== 'CASH' && participation.finalPaymentStatus !== 'PAID') {
       return res.status(400).json({ message: 'Please pay the remaining balance before confirming receipt' });
     }
@@ -240,6 +246,115 @@ export const confirmReceipt = async (req, res) => {
     await participation.save();
 
     res.status(200).json({ message: 'Receipt confirmed', participation });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ─── supplier-side delivery tracking ───
+
+// a non-cash order can only be shipped once the shop paid the remaining balance
+// (cash is settled at the door, so it is always shippable)
+const isShippable = (participation) =>
+  participation.status === 'ACTIVE' &&
+  participation.deliveryStatus === 'PENDING_DELIVERY' &&
+  (participation.paymentMethod === 'CASH' || participation.finalPaymentStatus === 'PAID');
+
+const parseExpectedDate = (value) => {
+  if (!value) return { date: undefined };
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return { error: 'Invalid expected delivery date' };
+  if (d.getTime() < Date.now() - 24 * 60 * 60 * 1000) return { error: 'Expected delivery date cannot be in the past' };
+  return { date: d };
+};
+
+// loads the pool and makes sure the requesting supplier owns it and it is COMPLETED
+const loadOwnedCompletedPool = async (req, poolId) => {
+  const supplier = await Supplier.findOne({ userId: req.user._id });
+  if (!supplier) return { status: 404, message: 'No supplier profile found for this user' };
+
+  const pool = await Pool.findById(poolId);
+  if (!pool) return { status: 404, message: 'Pool not found' };
+  if (String(pool.supplierId) !== String(supplier._id)) return { status: 403, message: 'You do not own this pool' };
+  if (pool.status !== 'COMPLETED') {
+    return { status: 400, message: 'Orders can only be shipped after the pool is confirmed' };
+  }
+  return { pool };
+};
+
+// @route   PUT /api/participations/:id/mark-shipped
+// @access  Private (supplier only)
+export const markShipped = async (req, res) => {
+  try {
+    const participation = await Participation.findById(req.params.id);
+    if (!participation) {
+      return res.status(404).json({ message: 'Participation not found' });
+    }
+
+    const owned = await loadOwnedCompletedPool(req, participation.poolId);
+    if (owned.message) return res.status(owned.status).json({ message: owned.message });
+
+    if (participation.status !== 'ACTIVE') {
+      return res.status(400).json({ message: 'Cannot ship a cancelled participation' });
+    }
+    if (participation.deliveryStatus !== 'PENDING_DELIVERY') {
+      return res.status(400).json({ message: 'This order was already shipped' });
+    }
+    if (!isShippable(participation)) {
+      return res.status(400).json({ message: 'The shop has not paid the remaining balance yet' });
+    }
+
+    const { date, error } = parseExpectedDate(req.body.expectedDeliveryDate);
+    if (error) return res.status(400).json({ message: error });
+
+    participation.deliveryStatus = 'OUT_FOR_DELIVERY';
+    participation.shippedAt = new Date();
+    if (date) participation.expectedDeliveryDate = date;
+    await participation.save();
+
+    res.status(200).json({ message: 'Order marked as shipped', participation });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @route   PUT /api/participations/pool/:poolId/mark-shipped
+// @access  Private (supplier only)
+// ships every order of the pool that is ready (cash, or remaining balance paid) in one
+// click; the rest are skipped and reported so the supplier knows who is still pending
+export const markPoolShipped = async (req, res) => {
+  try {
+    const owned = await loadOwnedCompletedPool(req, req.params.poolId);
+    if (owned.message) return res.status(owned.status).json({ message: owned.message });
+
+    const { date, error } = parseExpectedDate(req.body.expectedDeliveryDate);
+    if (error) return res.status(400).json({ message: error });
+
+    const pending = await Participation.find({
+      poolId: owned.pool._id,
+      status: 'ACTIVE',
+      deliveryStatus: 'PENDING_DELIVERY',
+    });
+    const ready = pending.filter(isShippable);
+
+    if (ready.length > 0) {
+      await Participation.updateMany(
+        { _id: { $in: ready.map((p) => p._id) } },
+        {
+          $set: {
+            deliveryStatus: 'OUT_FOR_DELIVERY',
+            shippedAt: new Date(),
+            ...(date ? { expectedDeliveryDate: date } : {}),
+          },
+        }
+      );
+    }
+
+    res.status(200).json({
+      message: 'Orders marked as shipped',
+      shippedCount: ready.length,
+      skippedCount: pending.length - ready.length,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
