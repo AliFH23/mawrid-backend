@@ -1,6 +1,8 @@
 import express from 'express';
 import {
   getMyParticipations,
+  getMyReliability,
+  getMySavings,
   getBalancePreview,
   payRemainingBalance,
   confirmReceipt,
@@ -13,6 +15,8 @@ const router = express.Router();
 
 // buyer
 router.get('/me', protect, authorize('buyer'), getMyParticipations);
+router.get('/me/reliability', protect, authorize('buyer'), getMyReliability);
+router.get('/me/savings', protect, authorize('buyer'), getMySavings);
 router.put('/:id/pay-balance', protect, authorize('buyer'), payRemainingBalance);
 router.get('/:id/balance-preview', protect, authorize('buyer'), getBalancePreview);
 router.put('/:id/confirm-receipt', protect, authorize('buyer'), confirmReceipt);

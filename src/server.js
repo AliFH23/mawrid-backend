@@ -23,6 +23,7 @@ import settingsRoutes from './routes/admin/settingsRoutes.js';
 import finesRoutes from './routes/admin/finesRoutes.js';
 import ratingRoutes from './routes/pool/ratingRoutes.js';
 import marketRequestRoutes from './routes/pool/marketRequestRoutes.js';
+import userLookupRoutes from './routes/admin/userLookupRoutes.js';
 
 connectDB();
 
@@ -50,6 +51,8 @@ app.use('/api/suppliers', supplierRoutes);
 app.use('/api/pools', poolRoutes);
 app.use('/api/participations', participationRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
+// must come before /api/admin so the more specific path is matched first
+app.use('/api/admin/lookup', userLookupRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/delivery-zones', deliveryZoneRoutes);
 app.use('/api/governorates', governorateRoutes);

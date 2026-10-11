@@ -99,6 +99,13 @@ const poolSchema = new mongoose.Schema(
     productExpiryDate: {
       type: Date,
     },
+    // أضف هذا الحقل داخل poolSchema في Pool.js (جنب unitPrice مثلاً):
+
+    // optional: the regular market price, so shops can see how much the pool saves them
+    marketPrice: {
+      type: Number,
+      min: [0, 'Market price cannot be negative'],
+    },
     
   },
   {

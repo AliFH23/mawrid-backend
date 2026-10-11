@@ -5,6 +5,7 @@ import Pool from '../../models/Pool.js';
 import Transaction from '../../models/Transaction.js';
 import PlatformSettings from '../../models/PlatformSettings.js';
 import Supplier from '../../models/Supplier.js';
+import { getShopsReliability } from '../../utils/shopReliability.js';
 
 // loyalty tiers — based on a shop's total historical PAID quantity across every
 // completed order ever (not just this pool). The more a shop keeps growing its
@@ -81,6 +82,67 @@ export const getMyParticipations = async (req, res) => {
       .sort({ createdAt: -1 });
 
     res.status(200).json({ participations });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @route   GET /api/participations/me/reliability
+// @access  Private (buyer only)
+export const getMyReliability = async (req, res) => {
+  try {
+    const shop = await Shop.findOne({ userId: req.user._id });
+    if (!shop) {
+      return res.status(404).json({ message: 'No shop found for this user' });
+    }
+
+    const map = await getShopsReliability([shop._id]);
+    res.status(200).json({ reliability: map.get(String(shop._id)) });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @route   GET /api/participations/me/savings
+// @access  Private (buyer only)
+// how much cheaper the shop's group-buys were than the regular market price.
+// "realized" = pools the supplier confirmed; "pending" = pools still open/waiting.
+// (loyalty discount and cashback are not counted — this is just the pool price vs market.)
+export const getMySavings = async (req, res) => {
+  try {
+    const shop = await Shop.findOne({ userId: req.user._id });
+    if (!shop) {
+      return res.status(404).json({ message: 'No shop found for this user' });
+    }
+
+    const participations = await Participation.find({ shopId: shop._id, status: 'ACTIVE' }).populate(
+      'poolId',
+      'unitPrice marketPrice status'
+    );
+
+    let realized = 0;
+    let pending = 0;
+    let realizedPools = 0;
+
+    participations.forEach((p) => {
+      const pool = p.poolId;
+      if (!pool || !pool.marketPrice || pool.marketPrice <= pool.unitPrice) return;
+      const saving = (pool.marketPrice - pool.unitPrice) * p.quantity;
+      if (pool.status === 'COMPLETED') {
+        realized += saving;
+        realizedPools += 1;
+      } else if (pool.status === 'OPEN' || pool.status === 'PENDING_SUPPLIER_CONFIRMATION') {
+        pending += saving;
+      }
+    });
+
+    res.status(200).json({
+      savings: {
+        realized: Math.round(realized * 100) / 100,
+        pending: Math.round(pending * 100) / 100,
+        realizedPools,
+      },
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

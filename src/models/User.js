@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
+import generatePublicId from '../utils/generatePublicId.js';
 
 const userSchema = new mongoose.Schema(
   {
@@ -41,6 +42,16 @@ const userSchema = new mongoose.Schema(
       required: [true, 'Role is required'],
     },
 
+    // human-friendly id the admin can search by (SHP-1001 for shops, SUP-1001 for suppliers).
+    // generated automatically on registration; sparse so accounts that have none (admins,
+    // or accounts not backfilled yet) don't collide on the unique index
+    publicId: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+    },
+
     // lets an Admin disable a user (bad behavior, fraud...) without deleting them
     isActive: {
       type: Boolean,
@@ -51,6 +62,19 @@ const userSchema = new mongoose.Schema(
     timestamps: true, // adds createdAt and updatedAt automatically
   }
 );
+
+// ─── give every new shop/supplier account its public id ───
+userSchema.pre('save', async function (next) {
+  try {
+    if (this.isNew && !this.publicId) {
+      const publicId = await generatePublicId(this.role);
+      if (publicId) this.publicId = publicId;
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ─── automatically hash the password before saving ───
 // only runs if the password field actually changed

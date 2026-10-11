@@ -9,6 +9,7 @@ import Shop from '../../models/Shop.js';
 import Participation from '../../models/Participation.js';
 import PurchaseOrder from '../../models/PurchaseOrder.js';
 import PlatformSettings from '../../models/PlatformSettings.js';
+import { getShopsReliability } from '../../utils/shopReliability.js';
 
 const MIN_RELIABILITY_SCORE_TO_CREATE_POOL = 50;
 const RELIABILITY_PENALTY_PER_REJECTION = 10;
@@ -44,9 +45,19 @@ const validateProductExpiry = (categories, productExpiryDate, poolExpiryDate) =>
 
 // @route   POST /api/pools
 // @access  Private (admin or supplier)
+// optional "regular market price" the supplier enters so shops can see how much they save.
+// returns an error message, or null when it's fine (empty is fine — the field is optional)
+const validateMarketPrice = (marketPrice, unitPrice) => {
+  if (marketPrice === undefined || marketPrice === null || marketPrice === '') return null;
+  const market = Number(marketPrice);
+  if (!Number.isFinite(market) || market <= 0) return 'marketPrice must be a positive number';
+  if (market <= Number(unitPrice)) return 'marketPrice must be higher than the pool unitPrice, otherwise there is no saving to show';
+  return null;
+};
+
 export const createPool = async (req, res) => {
   try {
-    const { productName, description, categoryIds, deliveryZone, unitPrice, minQuantity, maxQuantity, expiryDate, productExpiryDate } = req.body;
+    const { productName, description, categoryIds, deliveryZone, unitPrice, minQuantity, maxQuantity, expiryDate, productExpiryDate, marketPrice } = req.body;
 
     if (!productName || !categoryIds || !categoryIds.length || !deliveryZone || !unitPrice || !minQuantity || !maxQuantity || !expiryDate) {
       return res.status(400).json({ message: 'All fields are required (including at least one category)' });
@@ -64,6 +75,11 @@ export const createPool = async (req, res) => {
     const shelfLifeError = validateProductExpiry(validCategories, productExpiryDate, expiryDate);
     if (shelfLifeError) {
       return res.status(400).json({ message: shelfLifeError });
+    }
+
+    const marketPriceError = validateMarketPrice(marketPrice, unitPrice);
+    if (marketPriceError) {
+      return res.status(400).json({ message: marketPriceError });
     }
 
     const zone = await DeliveryZone.findOne({ _id: deliveryZone, isActive: true });
@@ -104,6 +120,7 @@ export const createPool = async (req, res) => {
       maxQuantity,
       expiryDate,
       productExpiryDate: productExpiryDate || undefined,
+      marketPrice: marketPrice ? Number(marketPrice) : undefined,
     });
 
     res.status(201).json({ pool });
@@ -747,7 +764,16 @@ export const getPoolParticipants = async (req, res) => {
       })
       .sort({ createdAt: -1 });
 
-    res.status(200).json({ participants });
+    // each shop's follow-through record (computed from its whole history, not just this pool)
+    const reliabilityByShop = await getShopsReliability(
+      participants.map((p) => p.shopId?._id).filter(Boolean)
+    );
+    const withReliability = participants.map((p) => ({
+      ...p.toObject(),
+      reliability: p.shopId ? reliabilityByShop.get(String(p.shopId._id)) : null,
+    }));
+
+    res.status(200).json({ participants: withReliability });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -775,7 +801,7 @@ export const updatePool = async (req, res) => {
       }
     }
 
-    const { productName, description, categoryIds, unitPrice, minQuantity, maxQuantity, deliveryZone, expiryDate, productExpiryDate } = req.body;
+    const { productName, description, categoryIds, unitPrice, minQuantity, maxQuantity, deliveryZone, expiryDate, productExpiryDate, marketPrice } = req.body;
 
     if (categoryIds !== undefined) {
       if (!categoryIds.length) {
@@ -816,6 +842,14 @@ export const updatePool = async (req, res) => {
       return res.status(400).json({ message: shelfLifeError });
     }
 
+    // checked against the price the pool WILL have after this edit
+    const effectiveUnitPrice = unitPrice !== undefined ? unitPrice : pool.unitPrice;
+    const effectiveMarketPrice = marketPrice !== undefined ? marketPrice || null : pool.marketPrice;
+    const marketPriceError = validateMarketPrice(effectiveMarketPrice, effectiveUnitPrice);
+    if (marketPriceError) {
+      return res.status(400).json({ message: marketPriceError });
+    }
+
     if (productName !== undefined) pool.productName = productName;
     if (description !== undefined) pool.description = description;
     if (categoryIds !== undefined) pool.categoryIds = categoryIds;
@@ -825,6 +859,7 @@ export const updatePool = async (req, res) => {
     if (deliveryZone !== undefined) pool.deliveryZone = deliveryZone;
     if (expiryDate !== undefined) pool.expiryDate = expiryDate;
     if (productExpiryDate !== undefined) pool.productExpiryDate = productExpiryDate || undefined;
+    if (marketPrice !== undefined) pool.marketPrice = marketPrice ? Number(marketPrice) : undefined;
 
     await pool.save();
 
