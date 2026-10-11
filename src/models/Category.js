@@ -20,6 +20,13 @@ const categorySchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+
+    // food / dairy / anything perishable: pools in this category MUST state the product's
+    // own expiry date (not to be confused with the pool's closing time)
+    requiresExpiry: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,

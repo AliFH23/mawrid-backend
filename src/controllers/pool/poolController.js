@@ -13,11 +13,40 @@ import PlatformSettings from '../../models/PlatformSettings.js';
 const MIN_RELIABILITY_SCORE_TO_CREATE_POOL = 50;
 const RELIABILITY_PENALTY_PER_REJECTION = 10;
 
+// a perishable product must still have at least this many days of shelf life left
+// AFTER the pool closes — otherwise shops would receive goods that are almost expired
+const MIN_SHELF_LIFE_DAYS = 30;
+
+const addDays = (dateLike, days) => {
+  const d = new Date(dateLike);
+  d.setDate(d.getDate() + days);
+  return d;
+};
+
+// returns an error message, or null when the product expiry date is acceptable.
+// `categories` are full Category docs, so we can tell whether any of them requires a date
+const validateProductExpiry = (categories, productExpiryDate, poolExpiryDate) => {
+  const required = categories.some((c) => c.requiresExpiry);
+
+  if (!productExpiryDate) {
+    return required ? 'Product expiry date is required for the selected category' : null;
+  }
+
+  const parsed = new Date(productExpiryDate);
+  if (Number.isNaN(parsed.getTime())) return 'productExpiryDate is not a valid date';
+
+  const earliestAllowed = addDays(poolExpiryDate, MIN_SHELF_LIFE_DAYS);
+  if (parsed < earliestAllowed) {
+    return `Product expiry date must be at least ${MIN_SHELF_LIFE_DAYS} days after the pool closes`;
+  }
+  return null;
+};
+
 // @route   POST /api/pools
 // @access  Private (admin or supplier)
 export const createPool = async (req, res) => {
   try {
-    const { productName, description, categoryIds, deliveryZone, unitPrice, minQuantity, maxQuantity, expiryDate } = req.body;
+    const { productName, description, categoryIds, deliveryZone, unitPrice, minQuantity, maxQuantity, expiryDate, productExpiryDate } = req.body;
 
     if (!productName || !categoryIds || !categoryIds.length || !deliveryZone || !unitPrice || !minQuantity || !maxQuantity || !expiryDate) {
       return res.status(400).json({ message: 'All fields are required (including at least one category)' });
@@ -30,6 +59,11 @@ export const createPool = async (req, res) => {
     const validCategories = await Category.find({ _id: { $in: categoryIds }, isActive: true });
     if (validCategories.length !== categoryIds.length) {
       return res.status(400).json({ message: 'One or more category ids are invalid' });
+    }
+
+    const shelfLifeError = validateProductExpiry(validCategories, productExpiryDate, expiryDate);
+    if (shelfLifeError) {
+      return res.status(400).json({ message: shelfLifeError });
     }
 
     const zone = await DeliveryZone.findOne({ _id: deliveryZone, isActive: true });
@@ -69,6 +103,7 @@ export const createPool = async (req, res) => {
       minQuantity,
       maxQuantity,
       expiryDate,
+      productExpiryDate: productExpiryDate || undefined,
     });
 
     res.status(201).json({ pool });
@@ -740,7 +775,7 @@ export const updatePool = async (req, res) => {
       }
     }
 
-    const { productName, description, categoryIds, unitPrice, minQuantity, maxQuantity, deliveryZone, expiryDate } = req.body;
+    const { productName, description, categoryIds, unitPrice, minQuantity, maxQuantity, deliveryZone, expiryDate, productExpiryDate } = req.body;
 
     if (categoryIds !== undefined) {
       if (!categoryIds.length) {
@@ -770,6 +805,17 @@ export const updatePool = async (req, res) => {
       }
     }
 
+    // re-check the shelf-life rule against what the pool WILL look like after this edit
+    // (an empty string / null for productExpiryDate means "clear it")
+    const effectiveCategoryIds = categoryIds !== undefined ? categoryIds : pool.categoryIds;
+    const effectiveExpiry = expiryDate !== undefined ? expiryDate : pool.expiryDate;
+    const effectiveProductExpiry = productExpiryDate !== undefined ? productExpiryDate || null : pool.productExpiryDate;
+    const effectiveCategories = await Category.find({ _id: { $in: effectiveCategoryIds } });
+    const shelfLifeError = validateProductExpiry(effectiveCategories, effectiveProductExpiry, effectiveExpiry);
+    if (shelfLifeError) {
+      return res.status(400).json({ message: shelfLifeError });
+    }
+
     if (productName !== undefined) pool.productName = productName;
     if (description !== undefined) pool.description = description;
     if (categoryIds !== undefined) pool.categoryIds = categoryIds;
@@ -778,6 +824,7 @@ export const updatePool = async (req, res) => {
     if (maxQuantity !== undefined) pool.maxQuantity = maxQuantity;
     if (deliveryZone !== undefined) pool.deliveryZone = deliveryZone;
     if (expiryDate !== undefined) pool.expiryDate = expiryDate;
+    if (productExpiryDate !== undefined) pool.productExpiryDate = productExpiryDate || undefined;
 
     await pool.save();
 
@@ -823,6 +870,12 @@ export const extendPool = async (req, res) => {
     }
     if (parsedDate <= pool.expiryDate) {
       return res.status(400).json({ message: 'newExpiryDate must be later than the current expiry date' });
+    }
+
+    if (pool.productExpiryDate && parsedDate > addDays(pool.productExpiryDate, -MIN_SHELF_LIFE_DAYS)) {
+      return res.status(400).json({
+        message: `Extending to this date would leave less than ${MIN_SHELF_LIFE_DAYS} days of product shelf life after the pool closes`,
+      });
     }
 
     pool.expiryDate = parsedDate;

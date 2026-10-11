@@ -95,6 +95,10 @@ const poolSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+        // shelf-life date printed on the product itself (food etc.) — NOT the pool's closing time
+    productExpiryDate: {
+      type: Date,
+    },
     
   },
   {

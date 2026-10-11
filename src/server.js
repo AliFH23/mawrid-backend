@@ -22,6 +22,7 @@ import contactRoutes from './routes/contact/contactRoutes.js';
 import settingsRoutes from './routes/admin/settingsRoutes.js';
 import finesRoutes from './routes/admin/finesRoutes.js';
 import ratingRoutes from './routes/pool/ratingRoutes.js';
+import marketRequestRoutes from './routes/pool/marketRequestRoutes.js';
 
 connectDB();
 
@@ -57,6 +58,7 @@ app.use('/api/contact-messages', contactRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/fines', finesRoutes);
 app.use('/api/ratings', ratingRoutes);
+app.use('/api/market-requests', marketRequestRoutes);
 app.use(notFound);
 app.use(errorHandler);
 
