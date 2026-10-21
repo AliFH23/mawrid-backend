@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { normalizeRegNumber, attachRegNumberGuards } from '../utils/businessRegistry.js';
 
 const shopSchema = new mongoose.Schema(
   {
@@ -16,10 +17,15 @@ const shopSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // one business = one account: stored normalized (digits/letters only) and unique, so the
+    // same commercial registration can't be used by a second shop. Cross-checks against
+    // suppliers and the blocklist happen in attachRegNumberGuards below.
     commercialRegistrationNumber: {
       type: String,
       required: [true, 'Commercial registration number is required'],
       trim: true,
+      set: normalizeRegNumber,
+      unique: true,
     },
 
     // accumulates from cashback earned on non-cash payments — informational for now,
@@ -64,5 +70,7 @@ const shopSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+attachRegNumberGuards(shopSchema);
 
 export default mongoose.model('Shop', shopSchema);

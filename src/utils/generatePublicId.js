@@ -1,9 +1,10 @@
 import Counter from '../models/Counter.js';
 
-// admins don't get a public id — it only exists so support can look up shops and suppliers
+// admins don't get a public id — it only exists so support can look up shops, suppliers and couriers
 const PREFIX_BY_ROLE = {
   buyer: 'SHP',
   supplier: 'SUP',
+  courier: 'DLV',
 };
 
 // numbering starts at 1001 so ids always look the same length: SHP-1001, SUP-1001, ...

@@ -79,6 +79,7 @@ export const getMyParticipations = async (req, res) => {
 
     const participations = await Participation.find({ shopId: shop._id })
       .populate('poolId')
+      .populate({ path: 'courierId', select: 'userId', populate: { path: 'userId', select: 'name phone' } })
       .sort({ createdAt: -1 });
 
     res.status(200).json({ participations });
@@ -362,6 +363,9 @@ export const markShipped = async (req, res) => {
     if (participation.deliveryStatus !== 'PENDING_DELIVERY') {
       return res.status(400).json({ message: 'This order was already shipped' });
     }
+    if (participation.courierId) {
+      return res.status(400).json({ message: 'A courier has already claimed this order — he will deliver it' });
+    }
     if (!isShippable(participation)) {
       return res.status(400).json({ message: 'The shop has not paid the remaining balance yet' });
     }
@@ -370,6 +374,7 @@ export const markShipped = async (req, res) => {
     if (error) return res.status(400).json({ message: error });
 
     participation.deliveryStatus = 'OUT_FOR_DELIVERY';
+    participation.offeredToCouriers = false;
     participation.shippedAt = new Date();
     if (date) participation.expectedDeliveryDate = date;
     await participation.save();
@@ -397,7 +402,8 @@ export const markPoolShipped = async (req, res) => {
       status: 'ACTIVE',
       deliveryStatus: 'PENDING_DELIVERY',
     });
-    const ready = pending.filter(isShippable);
+    // orders a courier already claimed are his to deliver, not shipped from here
+    const ready = pending.filter((p) => isShippable(p) && !p.courierId);
 
     if (ready.length > 0) {
       await Participation.updateMany(
@@ -405,6 +411,7 @@ export const markPoolShipped = async (req, res) => {
         {
           $set: {
             deliveryStatus: 'OUT_FOR_DELIVERY',
+            offeredToCouriers: false,
             shippedAt: new Date(),
             ...(date ? { expectedDeliveryDate: date } : {}),
           },
@@ -417,6 +424,63 @@ export const markPoolShipped = async (req, res) => {
       shippedCount: ready.length,
       skippedCount: pending.length - ready.length,
     });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @route   PUT /api/participations/pool/:poolId/offer-couriers
+// @access  Private (supplier only)
+// offers every ready, unclaimed order of the pool to the couriers of each shop's zone
+export const offerPoolToCouriers = async (req, res) => {
+  try {
+    const owned = await loadOwnedCompletedPool(req, req.params.poolId);
+    if (owned.message) return res.status(owned.status).json({ message: owned.message });
+
+    const pending = await Participation.find({
+      poolId: owned.pool._id,
+      status: 'ACTIVE',
+      deliveryStatus: 'PENDING_DELIVERY',
+    });
+    const toOffer = pending.filter((p) => isShippable(p) && !p.courierId && !p.offeredToCouriers);
+
+    if (toOffer.length > 0) {
+      await Participation.updateMany({ _id: { $in: toOffer.map((p) => p._id) } }, { $set: { offeredToCouriers: true } });
+    }
+
+    res.status(200).json({ message: 'Orders offered to couriers', offeredCount: toOffer.length });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @route   PUT /api/participations/:id/offer-couriers
+// @access  Private (supplier only)
+// body: { offer: true | false } — offer one order to couriers, or take the offer back
+// (taking it back is only possible while no courier has claimed it)
+export const setCourierOffer = async (req, res) => {
+  try {
+    const participation = await Participation.findById(req.params.id);
+    if (!participation) {
+      return res.status(404).json({ message: 'Participation not found' });
+    }
+
+    const owned = await loadOwnedCompletedPool(req, participation.poolId);
+    if (owned.message) return res.status(owned.status).json({ message: owned.message });
+
+    const offer = req.body.offer !== false;
+
+    if (participation.courierId) {
+      return res.status(400).json({ message: 'A courier already claimed this order — ask him to release it first' });
+    }
+    if (offer && !isShippable(participation)) {
+      return res.status(400).json({ message: 'The order is not ready yet (cancelled, shipped, or the shop has not paid the balance)' });
+    }
+
+    participation.offeredToCouriers = offer;
+    await participation.save();
+
+    res.status(200).json({ message: offer ? 'Order offered to couriers' : 'Offer withdrawn', participation });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

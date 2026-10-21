@@ -14,6 +14,14 @@ const deliveryZoneSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // the middle of the zone (the "qasaba"), set by the admin on the map. A pin dropped
+    // anywhere in Jordan is matched to the nearest zone center, so a zone with no center
+    // simply can't be auto-detected (it still works in the manual dropdowns).
+    center: {
+      lat: { type: Number, min: -90, max: 90 },
+      lng: { type: Number, min: -180, max: 180 },
+    },
+
     isActive: {
       type: Boolean,
       default: true,

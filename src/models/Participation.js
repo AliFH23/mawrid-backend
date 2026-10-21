@@ -81,6 +81,23 @@ const participationSchema = new mongoose.Schema(
       type: Date,
     },
 
+    // supplier opted this order into courier delivery: couriers of the shop's zone can see
+    // it on their board. Cleared if the supplier ships it himself instead.
+    offeredToCouriers: {
+      type: Boolean,
+      default: false,
+    },
+
+    // the courier who claimed the order, and when (see courierController)
+    courierId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Courier',
+    },
+
+    claimedAt: {
+      type: Date,
+    },
+
     rated: {
       type: Boolean,
       default: false,
@@ -96,5 +113,7 @@ const participationSchema = new mongoose.Schema(
 );
 
 participationSchema.index({ poolId: 1, shopId: 1 }, { unique: true });
+// the courier board query: offered, unclaimed, waiting for pickup
+participationSchema.index({ offeredToCouriers: 1, courierId: 1, deliveryStatus: 1 });
 
 export default mongoose.model('Participation', participationSchema);

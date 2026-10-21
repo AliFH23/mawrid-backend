@@ -8,6 +8,8 @@ import {
   confirmReceipt,
   markShipped,
   markPoolShipped,
+  offerPoolToCouriers,
+  setCourierOffer,
 } from '../../controllers/pool/participationController.js';
 import { protect, authorize } from '../../middleware/authMiddleware.js';
 
@@ -24,5 +26,9 @@ router.put('/:id/confirm-receipt', protect, authorize('buyer'), confirmReceipt);
 // supplier — delivery tracking
 router.put('/pool/:poolId/mark-shipped', protect, authorize('supplier'), markPoolShipped);
 router.put('/:id/mark-shipped', protect, authorize('supplier'), markShipped);
+
+// supplier — offer orders to the couriers of the shop's zone
+router.put('/pool/:poolId/offer-couriers', protect, authorize('supplier'), offerPoolToCouriers);
+router.put('/:id/offer-couriers', protect, authorize('supplier'), setCourierOffer);
 
 export default router;

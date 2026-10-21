@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   getDeliveryZones,
+  resolveDeliveryZone,
   createDeliveryZone,
   updateDeliveryZone,
   deleteDeliveryZone,
@@ -10,6 +11,9 @@ import { protect, authorize } from '../../middleware/authMiddleware.js';
 const router = express.Router();
 
 router.get('/', getDeliveryZones);
+
+// public like GET '/', because the register page needs it before login
+router.get('/resolve', resolveDeliveryZone);
 
 router.post('/', protect, authorize('admin'), createDeliveryZone);
 router.put('/:id', protect, authorize('admin'), updateDeliveryZone);

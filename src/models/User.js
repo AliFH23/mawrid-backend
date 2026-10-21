@@ -36,13 +36,13 @@ const userSchema = new mongoose.Schema(
     role: {
       type: String,
       enum: {
-        values: ['admin', 'supplier', 'buyer'],
-        message: 'Role must be admin, supplier, or buyer',
+        values: ['admin', 'supplier', 'buyer', 'courier'],
+        message: 'Role must be admin, supplier, buyer, or courier',
       },
       required: [true, 'Role is required'],
     },
 
-    // human-friendly id the admin can search by (SHP-1001 for shops, SUP-1001 for suppliers).
+    // human-friendly id the admin can search by (SHP-1001 for shops, SUP-1001 for suppliers, DLV-1001 for couriers).
     // generated automatically on registration; sparse so accounts that have none (admins,
     // or accounts not backfilled yet) don't collide on the unique index
     publicId: {

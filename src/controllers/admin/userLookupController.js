@@ -6,6 +6,9 @@ import Participation from '../../models/Participation.js';
 import PurchaseOrder from '../../models/PurchaseOrder.js';
 import Transaction from '../../models/Transaction.js';
 import Fine from '../../models/Fine.js';
+import Courier from '../../models/Courier.js';
+import BlockedBusiness from '../../models/BlockedBusiness.js';
+import { normalizeRegNumber } from '../../utils/businessRegistry.js';
 import { getShopsReliability } from '../../utils/shopReliability.js';
 
 const MAX_ROWS = 100; // per list — a support lookup needs recent history, not a full export
@@ -90,6 +93,35 @@ export const lookupUser = async (req, res) => {
       }
     }
 
+    // ─── courier side ───
+    if (user.role === 'courier') {
+      const courier = await Courier.findOne({ userId: user._id }).populate({
+        path: 'deliveryZone',
+        populate: { path: 'governorateId', select: 'name' },
+      });
+      result.profile = courier;
+
+      if (courier) {
+        const byStatus = await Participation.aggregate([
+          { $match: { courierId: courier._id, status: 'ACTIVE' } },
+          { $group: { _id: '$deliveryStatus', count: { $sum: 1 } } },
+        ]);
+        const countOf = (status) => byStatus.find((r) => r._id === status)?.count || 0;
+
+        result.deliverySummary = {
+          waitingPickup: countOf('PENDING_DELIVERY'),
+          outForDelivery: countOf('OUT_FOR_DELIVERY'),
+          delivered: countOf('DELIVERED'),
+        };
+
+        result.deliveries = await Participation.find({ courierId: courier._id, status: 'ACTIVE' })
+          .populate('poolId', 'productName')
+          .populate('shopId', 'shopName')
+          .sort({ claimedAt: -1 })
+          .limit(MAX_ROWS);
+      }
+    }
+
     // ─── supplier side ───
     if (user.role === 'supplier') {
       const supplier = await Supplier.findOne({ userId: user._id });
@@ -155,6 +187,12 @@ export const lookupUser = async (req, res) => {
           .sort({ createdAt: -1 })
           .limit(MAX_ROWS);
       }
+    }
+
+    // is this account's business number on the blocklist? (the admin page shows block / unblock)
+    const regNumber = result.profile?.commercialRegistrationNumber;
+    if (regNumber) {
+      result.businessBlocked = !!(await BlockedBusiness.exists({ number: normalizeRegNumber(regNumber) }));
     }
 
     res.status(200).json(result);

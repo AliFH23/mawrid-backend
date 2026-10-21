@@ -1,6 +1,10 @@
 import User from '../../models/User.js';
 import generateToken from '../../utils/generateToken.js';
 
+// roles a person may pick for themselves when signing up. "admin" is deliberately NOT here:
+// admin accounts are created by hand in the database, never through this public endpoint.
+const SELF_REGISTER_ROLES = ['buyer', 'supplier', 'courier'];
+
 // @route   GET /api/auth/check-email
 // @access  Public
 export const checkEmailAvailability = async (req, res) => {
@@ -25,6 +29,10 @@ export const registerUser = async (req, res) => {
 
     if (!name || !email || !password || !phone || !role) {
       return res.status(400).json({ message: 'All fields are required' });
+    }
+
+    if (!SELF_REGISTER_ROLES.includes(role)) {
+      return res.status(400).json({ message: `Role must be one of: ${SELF_REGISTER_ROLES.join(', ')}` });
     }
 
     const existingUser = await User.findOne({ email });

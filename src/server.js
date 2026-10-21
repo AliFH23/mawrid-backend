@@ -24,6 +24,8 @@ import finesRoutes from './routes/admin/finesRoutes.js';
 import ratingRoutes from './routes/pool/ratingRoutes.js';
 import marketRequestRoutes from './routes/pool/marketRequestRoutes.js';
 import userLookupRoutes from './routes/admin/userLookupRoutes.js';
+import courierRoutes from './routes/courier/courierRoutes.js';
+import businessRoutes from './routes/business/businessRoutes.js';
 
 connectDB();
 
@@ -62,6 +64,8 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/fines', finesRoutes);
 app.use('/api/ratings', ratingRoutes);
 app.use('/api/market-requests', marketRequestRoutes);
+app.use('/api/couriers', courierRoutes);
+app.use('/api/business', businessRoutes);
 app.use(notFound);
 app.use(errorHandler);
 

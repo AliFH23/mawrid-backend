@@ -762,6 +762,7 @@ export const getPoolParticipants = async (req, res) => {
         select: 'shopName deliveryZone userId',
         populate: { path: 'userId', select: 'name phone' },
       })
+      .populate({ path: 'courierId', select: 'userId', populate: { path: 'userId', select: 'name phone' } })
       .sort({ createdAt: -1 });
 
     // each shop's follow-through record (computed from its whole history, not just this pool)
