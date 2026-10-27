@@ -5,7 +5,9 @@ import dns from 'dns';
 // whatever the OS-level resolver is doing — works around a known Node.js-on-Windows
 // bug where SRV lookups (which MongoDB Atlas's mongodb+srv:// URIs depend on) fail
 // even when the OS's own DNS resolution works fine (confirmed via nslookup)
-dns.setServers(['8.8.8.8', '1.1.1.1']);
+if (process.env.NODE_ENV !== 'production') {
+  dns.setServers(['8.8.8.8', '1.1.1.1']);
+}
 
 const connectDB = async () => {
   try {

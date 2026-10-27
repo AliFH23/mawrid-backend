@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Mawrid (مَورِد) - B2B Pooled Procurement Platform API",
   "main": "src/server.js",
+  "engines": {
+    "node": ">=18"
+  },
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
